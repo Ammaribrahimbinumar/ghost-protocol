@@ -1,0 +1,33 @@
+# One-off discovery: which libsignal versions exist and what the public Java API looks like.
+name: discover-libsignal
+on:
+  workflow_dispatch:
+  push:
+    paths: [".github/workflows/discover-libsignal.yml"]
+jobs:
+  discover:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - name: Inspect
+        run: |
+          set +e
+          B=https://build-artifacts.signal.org/libraries/maven/org/signal
+          out=""
+          for art in libsignal-android libsignal-client; do
+            curl -fsS "$B/$art/maven-metadata.xml" -o "$RUNNER_TEMP/$art.xml" || echo "metadata fetch failed for $art"
+            out+="== $art metadata ==%0A$(grep -E '<(latest|release|version)>' $RUNNER_TEMP/$art.xml | tail -8 | tr -d ' ' | tr '\n' ' ')%0A"
+          done
+          echo "::notice title=versions::$out"
+          VER=$(grep -oP '(?<=<release>)[^<]+' $RUNNER_TEMP/libsignal-client.xml)
+          echo "release=$VER"
+          mkdir -p $RUNNER_TEMP/j && cd $RUNNER_TEMP/j
+          curl -fsS -O "$B/libsignal-client/$VER/libsignal-client-$VER.jar" || echo "jar fetch failed"
+          ls -la
+          msg="version=$VER%0A"
+          for c in org.signal.libsignal.protocol.SessionBuilder org.signal.libsignal.protocol.SessionCipher org.signal.libsignal.protocol.state.PreKeyBundle org.signal.libsignal.protocol.state.SignalProtocolStore org.signal.libsignal.protocol.IdentityKeyPair org.signal.libsignal.protocol.state.KyberPreKeyRecord org.signal.libsignal.protocol.state.impl.InMemorySignalProtocolStore org.signal.libsignal.protocol.fingerprint.NumericFingerprintGenerator org.signal.libsignal.protocol.groups.GroupCipher org.signal.libsignal.protocol.groups.GroupSessionBuilder org.signal.libsignal.protocol.kem.KEMKeyPair org.signal.libsignal.protocol.message.PreKeySignalMessage org.signal.libsignal.protocol.SignalProtocolAddress; do
+            msg+="--- $c%0A$(javap -public -cp libsignal-client-$VER.jar $c 2>&1 | head -40 | sed 's/^ *//' | tr '\n' '|')%0A"
+          done
+          echo "::notice title=api::${msg:0:30000}"
+          echo "::notice title=packages::$(unzip -l libsignal-client-$VER.jar | grep -oE 'org/signal/libsignal/[a-z/]+/' | sort -u | head -40 | tr '\n' ' ')  natives: $(unzip -l libsignal-client-$VER.jar | grep -E '\.so|\.dylib|\.dll' | awk '{print $4}' | tr '\n' ' ')"
