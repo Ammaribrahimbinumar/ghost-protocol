@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- No cleartext. Only system-installed CAs are trusted, so a CA the user (or malware)
+     added to the user store cannot be used to intercept relay traffic.
+     Certificate pinning is intentionally NOT enabled yet: it needs a documented key
+     rotation / recovery plan (see docs/ARCHITECTURE.md section 3). Pinning is defence in
+     depth only; end-to-end encryption does not depend on it. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

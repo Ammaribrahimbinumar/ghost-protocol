@@ -1,0 +1,25 @@
+# Security limitations
+
+Read together with `THREAT_MODEL.md` and `FEATURE_REPORT.md`.
+
+## Current state
+- The client has **no end-to-end encryption yet**. Nothing in the Android app should be treated as protecting messages.
+- The Android code has **never been compiled or run**. Every client security claim below is a design intent until tested on devices.
+- No external security review or penetration test has been done. None is claimed.
+
+## Inherent limits (even when finished)
+- **Not undetectable.** Android exposes the package name, permissions, notifications and network connections. The calculator label is a discretion measure only.
+- **Metadata.** The relay can see who connects, when, how much data, and (without sealed sender) which mailbox sends to which. Encryption does not hide that. Tor/I2P reduces IP exposure but does not defeat traffic analysis by a strong observer.
+- **Relay trust.** The relay can drop, delay or delete messages, and a malicious relay can try to substitute public keys at first contact. Only out-of-band safety-number verification defeats that.
+- **Endpoint compromise.** Malware, root, a modified OS, an unlocked phone, a screen-reading service or a camera pointed at the screen all bypass app-level protections (FLAG_SECURE, in-app keyboard, risk checks). Detection is best-effort and cannot prove a device is clean.
+- **Screenshots/recording.** FLAG_SECURE blocks standard capture paths only.
+- **Disappearing messages and deletion** cannot remove copies a recipient or compromised device already has.
+- **Removed group members** keep what they received before removal.
+- **Duress/decoy mode** (when built) does not defeat forensic analysis or guarantee safety under coercion.
+- **No recovery path.** A forgotten unlock code means wiping app data; there is deliberately no backdoor. With backups disabled, lost devices mean lost history.
+- **Throttling uses the wall clock;** someone who can move the device clock forward can skip a lockout.
+- **JVM memory.** Zeroing buffers reduces exposure, but Strings drawn to the screen and runtime copies cannot be wiped.
+
+## Library constraints
+- `libsignal` is AGPL-3.0 and states that use outside Signal is unsupported and its API may change without notice. Distributing the APK to invitees means they must be able to obtain the app's source.
+- Library versions in the project are unverified placeholders until resolved on a networked machine.

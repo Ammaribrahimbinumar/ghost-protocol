@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Launcher label. "Calculator" keeps the entry point discreet; change to taste.
+         This is not concealment: the package name and permissions remain visible to Android. -->
+    <string name="app_name">Calculator</string>
+</resources>
