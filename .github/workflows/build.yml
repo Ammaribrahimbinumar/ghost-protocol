@@ -29,7 +29,31 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with: { gradle-version: '8.9' }
       - name: Unit tests
-        run: cd "$ROOT/android" && gradle --no-daemon testDebugUnitTest
+        run: |
+          cd "$ROOT/android"
+          set +e
+          gradle --no-daemon testDebugUnitTest --stacktrace > "$RUNNER_TEMP/gradle.log" 2>&1
+          code=$?
+          if [ $code -ne 0 ]; then
+            # Surface the real errors as annotations so they are readable without downloading logs.
+            python3 - "$RUNNER_TEMP/gradle.log" <<'PY'
+          import sys,re
+          lines=open(sys.argv[1],errors='replace').read().splitlines()
+          keep=[]
+          for i,l in enumerate(lines):
+              if re.search(r'^e: |error:|FAILED|What went wrong|Could not|Unresolved|Caused by|AssertionError|Exception',l):
+                  keep.append(l.strip())
+          wrong=[]
+          for i,l in enumerate(lines):
+              if 'What went wrong' in l:
+                  wrong=[x.strip() for x in lines[i:i+12]]
+                  break
+          msg="%0A".join((wrong+['---']+keep[:40]))[:12000]
+          print("::error title=Gradle failure::"+msg)
+          print("::error title=Gradle log tail::"+"%0A".join(lines[-25:])[:6000])
+          PY
+          fi
+          exit $code
       - name: Debug APK
         run: cd "$ROOT/android" && gradle --no-daemon assembleDebug
       - uses: actions/upload-artifact@v4
