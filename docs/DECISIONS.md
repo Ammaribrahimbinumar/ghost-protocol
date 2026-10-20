@@ -20,3 +20,10 @@
 2. Phase 3: relay client and end-to-end message flow against the tested relay.
 3. Phase 4: SQLCipher storage, notification hygiene.
 Open blocker: Claude's GitHub app lacks push access to the repo, so each change is hand-copied by the owner.
+
+## 2026-10-21 progress
+- Phase 2 crypto core done and CI-tested (64 tests green; see FEATURE_REPORT). libsignal pinned 0.105.1; Kotlin 2.2.20; JDK 21 for the crypto module.
+- Repo layout flattened; `main` fast-forwarded to the green branch. Claude can push to the repo.
+- libsignal gotcha recorded in code: `SessionBuilder(store, REMOTE, local)` but `SessionCipher(store, LOCAL, remote)`; wrong order fails every message (caught by tests).
+- OPEN: add AGPL-3.0 `LICENSE` file (sandbox cannot download the text; owner adds via GitHub license template).
+- NEXT: integrate libsignal-android into the app; persistent encrypted stores (SQLCipher, Keystore-wrapped key); relay client; two-clients-through-real-relay integration test in CI; then safety-number/QR and key-change warning UI.
