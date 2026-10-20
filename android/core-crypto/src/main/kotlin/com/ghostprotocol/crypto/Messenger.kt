@@ -23,9 +23,10 @@ class Envelope(val bytes: ByteArray) {
  */
 class Messenger(private val device: LocalDevice) {
 
+    // NOTE: libsignal argument orders differ: SessionBuilder(store, REMOTE, local) but SessionCipher(store, LOCAL, remote).
     /** Start a session from the peer's bundle. Throws UntrustedIdentityException if the stored identity differs. */
     fun startSession(remote: SignalProtocolAddress, bundle: PreKeyBundle) {
-        SessionBuilder(device.store, device.address, remote).process(bundle)
+        SessionBuilder(device.store, remote, device.address).process(bundle)
     }
 
     fun encrypt(remote: SignalProtocolAddress, plaintext: ByteArray): Envelope {
