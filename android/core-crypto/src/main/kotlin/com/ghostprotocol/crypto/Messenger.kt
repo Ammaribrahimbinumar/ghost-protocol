@@ -25,18 +25,18 @@ class Messenger(private val device: LocalDevice) {
 
     /** Start a session from the peer's bundle. Throws UntrustedIdentityException if the stored identity differs. */
     fun startSession(remote: SignalProtocolAddress, bundle: PreKeyBundle) {
-        SessionBuilder(device.store, remote).process(bundle)
+        SessionBuilder(device.store, remote, device.address).process(bundle)
     }
 
     fun encrypt(remote: SignalProtocolAddress, plaintext: ByteArray): Envelope {
-        val msg = SessionCipher(device.store, remote).encrypt(plaintext)
+        val msg = SessionCipher(device.store, remote, device.address).encrypt(plaintext)
         return Envelope(byteArrayOf(msg.type.toByte()) + msg.serialize())
     }
 
     fun decrypt(remote: SignalProtocolAddress, envelope: Envelope): ByteArray {
         require(envelope.bytes.size > 1) { "empty envelope" }
         val body = envelope.bytes.copyOfRange(1, envelope.bytes.size)
-        val cipher = SessionCipher(device.store, remote)
+        val cipher = SessionCipher(device.store, remote, device.address)
         return when (envelope.bytes[0].toInt()) {
             CiphertextMessage.PREKEY_TYPE -> cipher.decrypt(PreKeySignalMessage(body))
             CiphertextMessage.WHISPER_TYPE -> cipher.decrypt(SignalMessage(body))
