@@ -3,7 +3,7 @@
 Status legend used across all project documents:
 **IMPLEMENTED** (code exists) · **TESTED** (a test was actually run and passed) · **NOT COMPILED** (source written, never built) · **NOT IMPLEMENTED** · **BLOCKED**.
 
-Environment note: the authoring sandbox cannot reach Maven Central, Google Maven or the Android SDK host, so **no Android code in this repository has been compiled or run**. Only the relay (Go, stdlib only) has been built and tested. See `FEATURE_REPORT.md`.
+Build note: the authoring sandbox cannot reach Android/Maven hosts, so builds and tests run on GitHub Actions. See `FEATURE_REPORT.md` for exactly what has been run.
 
 ## 1. Components
 
@@ -32,7 +32,8 @@ Environment note: the authoring sandbox cannot reach Maven Central, Google Maven
 **Findings from checking the library (sources fetched during this session):**
 1. License is **AGPL-3.0**. Distributing an APK that links it to invited users means those users must be able to obtain the app's corresponding source. Ghost_Protocol must therefore be released under AGPL-3.0-compatible terms. This is a real constraint, not a formality — decide before distributing. (Source: https://github.com/SignalApp/libsignal-client)
 2. The project states "Use outside of Signal is unsupported" and that APIs may change without notice. Pin an exact version and re-run the crypto tests on every upgrade.
-3. The version visible on Maven Central (0.86.5) is about a year old; the project documents its own Maven repository (`build-artifacts.signal.org`). **The correct version to pin was not verified here** because that host was not reachable. Verify on a networked machine before building. (Source: https://central.sonatype.com/artifact/org.signal/libsignal-android)
+3. **Pinned version: 0.105.1**, the latest in Signal's own Maven repository (verified by a CI run; the Maven Central copy is stale). The JVM artifact needs JDK 21 and Kotlin 2.2+.
+4. **Licence decision (owner delegated to Claude): AGPL-3.0 with public source.** (Source: https://central.sonatype.com/artifact/org.signal/libsignal-android)
 
 **Alternative considered:** Matrix Olm/Megolm (vodozemac, Apache-2.0). Not selected because Android/Kotlin binding availability and maintenance could not be verified in this session. Mixing the two stacks is explicitly rejected (one coherent protocol).
 
@@ -82,6 +83,7 @@ A calculator front-end is a discretion measure, not invisibility. Package list, 
 
 ```
 relay/      Go relay + tests            (IMPLEMENTED, TESTED)
-android/    Kotlin/Compose client       (NOT COMPILED)
+android/    Kotlin/Compose client       (compiled + unit-tested in CI; not run on a device)
+android/core-crypto  libsignal wrapper, pure JVM (tested in CI)
 docs/       architecture, threat model, reports
 ```

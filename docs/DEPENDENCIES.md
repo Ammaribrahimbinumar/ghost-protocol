@@ -1,6 +1,6 @@
 # Dependency and licensing inventory
 
-Status: **versions unverified.** The authoring environment could not reach Maven Central or Google Maven, so none of the Android versions were resolved or checked for advisories. Fill in the "Verified version / date / advisories checked" columns on a networked machine before building.
+Status (updated): versions below the first table resolved and built in CI; libsignal 0.105.1 verified as the latest in Signal's repository by a CI discovery run. Resolving is NOT a security review: advisories and changelogs still need reading before release. Original note: versions were unverified. The authoring environment could not reach Maven Central or Google Maven, so none of the Android versions were resolved or checked for advisories. Fill in the "Verified version / date / advisories checked" columns on a networked machine before building.
 
 ## Relay (Go)
 | Dependency | License | Notes |
@@ -11,7 +11,7 @@ Status: **versions unverified.** The authoring environment could not reach Maven
 | Dependency | Placeholder version | License | Verified version / advisories |
 |---|---|---|---|
 | Android Gradle Plugin | 8.7.3 | Apache-2.0 | TODO |
-| Kotlin (+ Compose compiler plugin) | 2.0.21 | Apache-2.0 | TODO |
+| Kotlin (+ Compose compiler plugin) | 2.2.20 (required: libsignal metadata is Kotlin 2.2) | Apache-2.0 | TODO |
 | Compose BOM / UI / Foundation / Material3 | 2024.12.01 | Apache-2.0 | TODO |
 | androidx.activity:activity-compose | 1.9.3 | Apache-2.0 | TODO |
 | androidx.lifecycle:lifecycle-runtime-compose | 2.8.7 | Apache-2.0 | TODO |
@@ -21,7 +21,7 @@ Status: **versions unverified.** The authoring environment could not reach Maven
 ## Android — planned, not yet integrated
 | Dependency | License | What was checked this session |
 |---|---|---|
-| `org.signal:libsignal-android` | **AGPL-3.0** | Project README says AGPLv3 and "Use outside of Signal is unsupported". Maven Central shows 0.86.5 (~11 months old); newer builds are in Signal's own repository `build-artifacts.signal.org/libraries/maven/`. Exact version to pin: NOT determined |
+| `org.signal:libsignal-client` (JVM, used by `core-crypto`) and `libsignal-android` (planned for the app) | **AGPL-3.0** | **Pinned 0.105.1** (latest in `build-artifacts.signal.org/libraries/maven/` per CI run 39323710575; Maven Central's 0.86.5 is stale). Requires JDK 21 for the JVM artifact. README: "Use outside of Signal is unsupported". Project decision: release Ghost_Protocol under AGPL-3.0 with public source |
 | `net.zetetic:sqlcipher-android` | BSD-style (Community Edition) | SQLCipher 4.18.0 release notes (Aug 2026) mention Room 3 support. The Android package version to pin: NOT determined |
 | AndroidX Room | Apache-2.0 | Not yet chosen |
 

@@ -7,10 +7,14 @@ Written at the end of the first working session. Categories:
 - **NOT IMPLEMENTED** — no code.
 - **BLOCKED** — cannot proceed without something outside this environment.
 
-## CI result (GitHub Actions, run 39322571415, commit 02b4d26) — UPDATE
-On GitHub-hosted runners (ubuntu-24.04, JDK 17, Gradle 8.9): **relay job PASS (go vet + 14 tests, -race); android job PASS (testDebugUnitTest and assembleDebug both succeeded; a debug APK was produced).** Per-test counts were not visible to the assistant; the uploaded `android-results` artifact contains the reports. The APK is a debug build, has not been run on a device, and all on-device behaviour (FLAG_SECURE, Keystore, keyboard) remains UNVERIFIED. The section below describes the earlier sandbox limitation that led to using CI.
+## CI result (GitHub Actions, branch `claude/phase2-crypto`, run 39482322352, commit f0c959c)
+On GitHub-hosted runners (ubuntu-24.04, JDK 21, Gradle 8.9, Kotlin 2.2.20): **relay job PASS (go vet + 14 tests, -race); android job PASS: 64 unit tests, 0 failures, 0 skipped (49 app tests + 15 crypto-core tests, counts read from the XML reports).** A debug APK is also built. The APK has not been run on a device; all on-device behaviour (FLAG_SECURE, Keystore, keyboard) remains UNVERIFIED. libsignal itself (the cryptography) is not tested by us beyond using it correctly; its correctness is assumed.
 
-## Why the Android app was unbuilt in the sandbox
+## Phase 2 crypto core (`android/core-crypto`, pure JVM, libsignal-client 0.105.1) — TESTED IN CI
+15 tests in `ProtocolTest`, all passing: two-party round trip both directions (20 exchanges); ciphertext does not contain plaintext and is randomised; **every single-byte modification of a message is rejected** and a failed forgery does not damage the session; truncated/empty envelopes rejected; replay rejected (DuplicateMessageException); out-of-order delivery works; wrong recipient and wrong sender address cannot decrypt; **changed identity key is rejected (UntrustedIdentityException), not silently trusted**; safety numbers match for honest parties and differ under a substituted key; independent one-time prekeys; session without a one-time prekey; prekey-message replay after key consumption rejected; malformed bundles rejected without crashing; forged signed-prekey signature rejected.
+Limits: in-memory stores only (no persistence); two-party only (no groups/broadcast yet); forward secrecy and post-compromise recovery are properties of the Signal protocol/libsignal and are **not** independently tested here; not yet wired into the Android app (needs libsignal-android swap); no relay integration yet.
+
+## Background: why builds run in CI, not in the sandbox
 
 The sandbox's network policy denies `repo.maven.apache.org`, `maven.google.com` and `dl.google.com` (the proxy log records 403 on CONNECT for each), and no Android SDK is installed. The Android SDK is distributed only from `dl.google.com`. As a result **no Kotlin was compiled and no APK exists.** A standalone Kotlin compiler could not be obtained either. The relay is the only component that was built and run.
 
@@ -55,7 +59,11 @@ Command: `cd relay && go vet ./... && go test -race -count=1 ./...` → 14 tests
 | FLAG_SECURE, recents protection, overlay hiding, touch filtering | COMPILED + UNIT TESTS PASS IN CI (not run on a device) | Not verified on any Android version |
 | Accessibility/ADB/dev-options checks with warn/block policy | COMPILED + UNIT TESTS PASS IN CI (not run on a device) | Default policy is warn-only (blocking would exclude TalkBack users) |
 | Lock on leaving the app | COMPILED + UNIT TESTS PASS IN CI (not run on a device) | In-foreground inactivity timer NOT IMPLEMENTED |
-| Libsignal E2EE (identity, sessions, ratchet, safety numbers, key-change warnings) | NOT IMPLEMENTED | Library chosen (see ARCHITECTURE.md); needs network to resolve; AGPL decision required |
+| Identity + prekey generation, bundle encode/decode, 1:1 session setup and encryption via libsignal | TESTED IN CI (JVM, in-memory) | `core-crypto` ProtocolTest |
+| Tamper detection, replay rejection, out-of-order delivery | TESTED IN CI | same |
+| Identity-key-change rejection at crypto layer | TESTED IN CI | User-facing warning screen NOT IMPLEMENTED |
+| Safety-number computation (match/mismatch) | TESTED IN CI | QR scan and verification UI NOT IMPLEMENTED |
+| Persistent encrypted key/session storage; libsignal-android integration into the app | NOT IMPLEMENTED | Phase 4 / next step |
 | Relay client, offline queue consumption | NOT IMPLEMENTED | |
 | Encrypted Room/SQLCipher database, search, edit/delete, reactions, replies | NOT IMPLEMENTED | |
 | Encrypted attachments | NOT IMPLEMENTED | |
@@ -73,10 +81,10 @@ Command: `cd relay && go vet ./... && go test -race -count=1 ./...` → 14 tests
 
 | Criterion | Status |
 |---|---|
-| Two installed clients exchange encrypted messages | NOT MET |
+| Two installed clients exchange encrypted messages | NOT MET end to end. Two in-process parties exchange and decrypt in CI tests; no installed apps, no relay in the loop |
 | Relay cannot decrypt contents | Structurally true (it never receives keys; relay tests pass). Not demonstrated end to end |
-| Client detects tampering | NOT MET (no client crypto) |
-| Contact identity verification works | NOT MET |
+| Client detects tampering | Crypto layer TESTED IN CI (all byte flips rejected); not yet in the app |
+| Contact identity verification works | Crypto layer TESTED (safety numbers, key-change rejection); no UI yet |
 | Messages encrypted in local storage | NOT MET |
 | No plaintext in logs/notifications | Relay: TESTED. Client: NOT MET |
 | Calculator unlock works | Written, not compiled, not run |
@@ -87,4 +95,4 @@ Command: `cd relay && go vet ./... && go test -race -count=1 ./...` → 14 tests
 | Build/install instructions work | Written, NOT executed |
 | Limitations document matches implementation | Written; see `SECURITY_LIMITATIONS.md` |
 
-**Overall: this is a tested relay plus a small, uncompiled Phase 1 client. It is not a usable messenger, and no security claim about the client should be relied on yet.**
+**Overall: a tested relay, a Phase 1 client that compiles and passes unit tests in CI, and a tested libsignal crypto core that is not yet connected to the app. It is not a usable messenger yet.**

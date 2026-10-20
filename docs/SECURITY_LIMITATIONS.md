@@ -3,8 +3,8 @@
 Read together with `THREAT_MODEL.md` and `FEATURE_REPORT.md`.
 
 ## Current state
-- The client has **no end-to-end encryption yet**. Nothing in the Android app should be treated as protecting messages.
-- The Android code has **never been compiled or run**. Every client security claim below is a design intent until tested on devices.
+- The Android app is **not yet connected to end-to-end encryption**. The libsignal-based crypto core exists and passes its tests in CI, but nothing in the app sends or stores messages yet, so the app should not be treated as protecting messages.
+- The Android code compiles and its unit tests pass in CI, but it has **never been run on a device**. Every on-device claim below is a design intent until tested on real phones.
 - No external security review or penetration test has been done. None is claimed.
 
 ## Inherent limits (even when finished)
