@@ -1,11 +1,7 @@
-# Place at: .github/workflows/build.yml (repo root). NOT YET RUN.
 name: build-and-test
 on:
   push:
   workflow_dispatch:
-
-env:
-  ROOT: "ghost_protocol file 001/ghost_protocol"
 
 jobs:
   relay:
@@ -14,7 +10,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with: { go-version: '1.24' }
-      - run: cd "$ROOT/relay" && go vet ./... && go test -race -count=1 ./...
+      - run: cd relay && go vet ./... && go test -race -count=1 ./...
 
   android:
     runs-on: ubuntu-24.04
@@ -23,44 +19,32 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '17' }
       - name: Accept Android SDK licenses (SDK is preinstalled on this image)
-        run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
       - uses: gradle/actions/setup-gradle@v4
         with: { gradle-version: '8.9' }
-      - name: Unit tests
+      - name: Unit tests (app + crypto core)
         run: |
-          cd "$ROOT/android"
+          cd android
           set +e
-          gradle --no-daemon testDebugUnitTest --stacktrace > "$RUNNER_TEMP/gradle.log" 2>&1
+          gradle --no-daemon --continue :core-crypto:test testDebugUnitTest --stacktrace > "$RUNNER_TEMP/gradle.log" 2>&1
           code=$?
+          echo "gradle exit code: $code"
           if [ $code -ne 0 ]; then
-            # Surface the real errors as annotations so they are readable without downloading logs.
-            python3 - "$RUNNER_TEMP/gradle.log" <<'PY'
-          import sys,re
-          lines=open(sys.argv[1],errors='replace').read().splitlines()
-          keep=[]
-          for i,l in enumerate(lines):
-              if re.search(r'^e: |error:|FAILED|What went wrong|Could not|Unresolved|Caused by|AssertionError|Exception',l):
-                  keep.append(l.strip())
-          wrong=[]
-          for i,l in enumerate(lines):
-              if 'What went wrong' in l:
-                  wrong=[x.strip() for x in lines[i:i+12]]
-                  break
-          msg="%0A".join((wrong+['---']+keep[:40]))[:12000]
-          print("::error title=Gradle failure::"+msg)
-          print("::error title=Gradle log tail::"+"%0A".join(lines[-25:])[:6000])
-          PY
+            python3 "$GITHUB_WORKSPACE/.github/scripts/explain_failure.py" "$RUNNER_TEMP/gradle.log"
           fi
           exit $code
+      - name: Test summary (counts from XML reports)
+        if: always()
+        run: python3 .github/scripts/summarize_tests.py android
       - name: Debug APK
-        run: cd "$ROOT/android" && gradle --no-daemon assembleDebug
+        run: cd android && gradle --no-daemon assembleDebug
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: android-results
           path: |
-            ghost_protocol file 001/ghost_protocol/android/app/build/reports/tests/
-            ghost_protocol file 001/ghost_protocol/android/app/build/test-results/
-            ghost_protocol file 001/ghost_protocol/android/app/build/outputs/apk/debug/*.apk
+            android/app/build/reports/tests/
+            android/app/build/test-results/
+            android/core-crypto/build/reports/tests/
+            android/core-crypto/build/test-results/
+            android/app/build/outputs/apk/debug/*.apk

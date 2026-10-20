@@ -1,8 +1,6 @@
-# !!! NOT VERIFIED !!!
-# These versions were written without network access to Maven Central / Google Maven,
-# so none of them has been resolved, built against, or checked for security advisories.
-# Before building: update each to the current stable release, read its changelog and
-# advisories, and record the result in docs/DEPENDENCIES.md.
+# Resolution status: all versions below resolved and built in CI (run 39322571415), EXCEPT libsignal
+# (0.105.1 = latest in Signal's Maven repo per CI discovery run 39323710575; used from the crypto module).
+# Resolving is not a security review: read changelogs/advisories before upgrading or shipping.
 
 [versions]
 agp = "8.7.3"
@@ -12,6 +10,7 @@ activityCompose = "1.9.3"
 lifecycle = "2.8.7"
 coroutines = "1.9.0"
 junit = "4.13.2"
+libsignal = "0.105.1"
 
 [libraries]
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
@@ -23,8 +22,11 @@ androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-ru
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
 junit = { module = "junit:junit", version.ref = "junit" }
+libsignal-client = { module = "org.signal:libsignal-client", version.ref = "libsignal" }
+libsignal-android = { module = "org.signal:libsignal-android", version.ref = "libsignal" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

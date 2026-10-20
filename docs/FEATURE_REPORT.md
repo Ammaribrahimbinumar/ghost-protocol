@@ -3,11 +3,14 @@
 Written at the end of the first working session. Categories:
 
 - **TESTED** — a test was executed in this environment and passed.
-- **WRITTEN, NOT COMPILED** — source exists but was never built or run.
+- **COMPILED + UNIT TESTS PASS IN CI (not run on a device)** — source exists but was never built or run.
 - **NOT IMPLEMENTED** — no code.
 - **BLOCKED** — cannot proceed without something outside this environment.
 
-## Why the Android app is unbuilt
+## CI result (GitHub Actions, run 39322571415, commit 02b4d26) — UPDATE
+On GitHub-hosted runners (ubuntu-24.04, JDK 17, Gradle 8.9): **relay job PASS (go vet + 14 tests, -race); android job PASS (testDebugUnitTest and assembleDebug both succeeded; a debug APK was produced).** Per-test counts were not visible to the assistant; the uploaded `android-results` artifact contains the reports. The APK is a debug build, has not been run on a device, and all on-device behaviour (FLAG_SECURE, Keystore, keyboard) remains UNVERIFIED. The section below describes the earlier sandbox limitation that led to using CI.
+
+## Why the Android app was unbuilt in the sandbox
 
 The sandbox's network policy denies `repo.maven.apache.org`, `maven.google.com` and `dl.google.com` (the proxy log records 403 on CONNECT for each), and no Android SDK is installed. The Android SDK is distributed only from `dl.google.com`. As a result **no Kotlin was compiled and no APK exists.** A standalone Kotlin compiler could not be obtained either. The relay is the only component that was built and run.
 
@@ -42,16 +45,16 @@ Command: `cd relay && go vet ./... && go test -race -count=1 ./...` → 14 tests
 
 | Feature | Status | Notes |
 |---|---|---|
-| Gradle project, manifest, backup/data-extraction exclusions, no-cleartext + system-CA-only network config | WRITTEN, NOT COMPILED | Versions in `libs.versions.toml` are unverified placeholders |
-| Calculator (arithmetic, decimals, %, parentheses, delete/clear) | WRITTEN, NOT COMPILED | Unit tests written, never run |
-| Configurable secret unlock (PBKDF2-HMAC-SHA256, 600k iterations, salt, exponential back-off, no default code) | WRITTEN, NOT COMPILED | Unit tests written, never run |
-| Wrong/throttled/right input indistinguishable on the calculator | WRITTEN, NOT COMPILED | Controller test written, never run |
-| Keystore-wrapped storage for the verifier record | WRITTEN, NOT COMPILED | Needs real-device testing (StrongBox/TEE behaviour varies) |
-| In-app keyboard (QWERTY, symbols, shift) + numeric keypad, no IME | WRITTEN, NOT COMPILED | No language/layout selector |
-| Zeroable input buffers | WRITTEN, NOT COMPILED | JVM `String` copies for drawing cannot be wiped |
-| FLAG_SECURE, recents protection, overlay hiding, touch filtering | WRITTEN, NOT COMPILED | Not verified on any Android version |
-| Accessibility/ADB/dev-options checks with warn/block policy | WRITTEN, NOT COMPILED | Default policy is warn-only (blocking would exclude TalkBack users) |
-| Lock on leaving the app | WRITTEN, NOT COMPILED | In-foreground inactivity timer NOT IMPLEMENTED |
+| Gradle project, manifest, backup/data-extraction exclusions, no-cleartext + system-CA-only network config | COMPILED + UNIT TESTS PASS IN CI (not run on a device) | Versions in `libs.versions.toml` are unverified placeholders |
+| Calculator (arithmetic, decimals, %, parentheses, delete/clear) | COMPILED + UNIT TESTS PASS IN CI (not run on a device) | Unit tests written, never run |
+| Configurable secret unlock (PBKDF2-HMAC-SHA256, 600k iterations, salt, exponential back-off, no default code) | COMPILED + UNIT TESTS PASS IN CI (not run on a device) | Unit tests written, never run |
+| Wrong/throttled/right input indistinguishable on the calculator | COMPILED + UNIT TESTS PASS IN CI (not run on a device) | Controller test written, never run |
+| Keystore-wrapped storage for the verifier record | COMPILED + UNIT TESTS PASS IN CI (not run on a device) | Needs real-device testing (StrongBox/TEE behaviour varies) |
+| In-app keyboard (QWERTY, symbols, shift) + numeric keypad, no IME | COMPILED + UNIT TESTS PASS IN CI (not run on a device) | No language/layout selector |
+| Zeroable input buffers | COMPILED + UNIT TESTS PASS IN CI (not run on a device) | JVM `String` copies for drawing cannot be wiped |
+| FLAG_SECURE, recents protection, overlay hiding, touch filtering | COMPILED + UNIT TESTS PASS IN CI (not run on a device) | Not verified on any Android version |
+| Accessibility/ADB/dev-options checks with warn/block policy | COMPILED + UNIT TESTS PASS IN CI (not run on a device) | Default policy is warn-only (blocking would exclude TalkBack users) |
+| Lock on leaving the app | COMPILED + UNIT TESTS PASS IN CI (not run on a device) | In-foreground inactivity timer NOT IMPLEMENTED |
 | Libsignal E2EE (identity, sessions, ratchet, safety numbers, key-change warnings) | NOT IMPLEMENTED | Library chosen (see ARCHITECTURE.md); needs network to resolve; AGPL decision required |
 | Relay client, offline queue consumption | NOT IMPLEMENTED | |
 | Encrypted Room/SQLCipher database, search, edit/delete, reactions, replies | NOT IMPLEMENTED | |
