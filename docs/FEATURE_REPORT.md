@@ -10,6 +10,11 @@ Written at the end of the first working session. Categories:
 ## CI result (GitHub Actions, branch `claude/phase2-crypto`, run 39482322352, commit f0c959c)
 On GitHub-hosted runners (ubuntu-24.04, JDK 21, Gradle 8.9, Kotlin 2.2.20): **relay job PASS (go vet + 14 tests, -race); android job PASS: 64 unit tests, 0 failures, 0 skipped (49 app tests + 15 crypto-core tests, counts read from the XML reports).** A debug APK is also built. The APK has not been run on a device; all on-device behaviour (FLAG_SECURE, Keystore, keyboard) remains UNVERIFIED. libsignal itself (the cryptography) is not tested by us beyond using it correctly; its correctness is assumed.
 
+## Phase 3 relay integration (CI run on branch `claude/phase3-relay-client`, commit 8d43344) — TESTED IN CI
+**75 tests, 0 failures, 0 skipped** (49 app + 15 protocol + 5 packet/encoding + 6 relay-integration). CI builds the real Go relay, starts it on loopback, and runs two Kotlin clients (separate identities, separate Ed25519 relay-auth keys) through it over HTTP, then greps the relay's log.
+Integration tests (`RelayIntegrationTest`): full round trip through the relay with ack; the bytes the relay holds do not contain the plaintext; **relay-side tampering of any single byte of a queued message is detected** (genuine message still decrypts); **relay replaying an unacknowledged message is rejected**; **relay substituting another user's key bundle is exposed by safety numbers** (first contact cannot prevent it; verification detects it); **a spoofed sender name cannot impersonate another user**; unsigned/wrongly-signed requests and oversized payloads are rejected. CI step: relay log contains no message text, usernames or mailbox IDs (clean).
+Limits: clients are in-process JVM test clients, **not installed apps**; transport is plain HTTP on loopback for the test only (the client refuses non-https otherwise; TLS 1.3 server behaviour is covered by the relay's own test); relay-auth signing uses the JDK's Ed25519, and **Android minSdk 26 lacks java.security Ed25519 (needs API 33), so the app needs a library implementation (OPEN)**; the sender username is visible to the relay in each packet (sealed sender NOT IMPLEMENTED); no persistent storage yet; no groups/broadcast/attachments; "Not run on a device".
+
 ## Phase 2 crypto core (`android/core-crypto`, pure JVM, libsignal-client 0.105.1) — TESTED IN CI
 15 tests in `ProtocolTest`, all passing: two-party round trip both directions (20 exchanges); ciphertext does not contain plaintext and is randomised; **every single-byte modification of a message is rejected** and a failed forgery does not damage the session; truncated/empty envelopes rejected; replay rejected (DuplicateMessageException); out-of-order delivery works; wrong recipient and wrong sender address cannot decrypt; **changed identity key is rejected (UntrustedIdentityException), not silently trusted**; safety numbers match for honest parties and differ under a substituted key; independent one-time prekeys; session without a one-time prekey; prekey-message replay after key consumption rejected; malformed bundles rejected without crashing; forged signed-prekey signature rejected.
 Limits: in-memory stores only (no persistence); two-party only (no groups/broadcast yet); forward secrecy and post-compromise recovery are properties of the Signal protocol/libsignal and are **not** independently tested here; not yet wired into the Android app (needs libsignal-android swap); no relay integration yet.
@@ -81,8 +86,8 @@ Command: `cd relay && go vet ./... && go test -race -count=1 ./...` → 14 tests
 
 | Criterion | Status |
 |---|---|
-| Two installed clients exchange encrypted messages | NOT MET end to end. Two in-process parties exchange and decrypt in CI tests; no installed apps, no relay in the loop |
-| Relay cannot decrypt contents | Structurally true (it never receives keys; relay tests pass). Not demonstrated end to end |
+| Two installed clients exchange encrypted messages | PARTIAL: two in-process JVM clients exchange and decrypt through the real relay in CI; no installed apps |
+| Relay cannot decrypt contents | Demonstrated in CI: relay never receives keys; bytes it holds contain no plaintext; its log is clean. (Not a proof; a relay can still see metadata) |
 | Client detects tampering | Crypto layer TESTED IN CI (all byte flips rejected); not yet in the app |
 | Contact identity verification works | Crypto layer TESTED (safety numbers, key-change rejection); no UI yet |
 | Messages encrypted in local storage | NOT MET |

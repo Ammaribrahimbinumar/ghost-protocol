@@ -27,3 +27,8 @@ Open blocker: Claude's GitHub app lacks push access to the repo, so each change 
 - libsignal gotcha recorded in code: `SessionBuilder(store, REMOTE, local)` but `SessionCipher(store, LOCAL, remote)`; wrong order fails every message (caught by tests).
 - OPEN: add AGPL-3.0 `LICENSE` file (sandbox cannot download the text; owner adds via GitHub license template).
 - NEXT: integrate libsignal-android into the app; persistent encrypted stores (SQLCipher, Keystore-wrapped key); relay client; two-clients-through-real-relay integration test in CI; then safety-number/QR and key-change warning UI.
+
+## 2026-10-21 (later): Phase 3 relay client
+- Added RelayClient (https only; loopback http only via explicit test flag), Packet format, and 6 integration tests against the real relay in CI (75 tests green, commit 8d43344).
+- Relay gained -ip-rate/-ip-burst flags (defaults unchanged); CI raises them for its loopback test relay because all test clients share one address.
+- OPEN: Ed25519 on Android < API 33 (need Tink/BouncyCastle-class library or change auth scheme); wire core-crypto into the app with libsignal-android; persistent encrypted stores.

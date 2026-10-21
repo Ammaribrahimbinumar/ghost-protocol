@@ -7,6 +7,11 @@ Read together with `THREAT_MODEL.md` and `FEATURE_REPORT.md`.
 - The Android code compiles and its unit tests pass in CI, but it has **never been run on a device**. Every on-device claim below is a design intent until tested on real phones.
 - No external security review or penetration test has been done. None is claimed.
 
+## Known gaps in the current implementation
+- The sender username is sent in clear inside each packet and the relay sees which mailbox sent it. Sealed sender is not implemented.
+- First contact is trust-on-first-use: a malicious relay can substitute keys at first contact; only comparing safety numbers detects it (tested: the numbers differ).
+- The relay-auth key needs an Ed25519 implementation that works on Android 8+ (java.security Ed25519 requires API 33). Not yet implemented.
+
 ## Inherent limits (even when finished)
 - **Not undetectable.** Android exposes the package name, permissions, notifications and network connections. The calculator label is a discretion measure only.
 - **Metadata.** The relay can see who connects, when, how much data, and (without sealed sender) which mailbox sends to which. Encryption does not hide that. Tor/I2P reduces IP exposure but does not defeat traffic analysis by a strong observer.
