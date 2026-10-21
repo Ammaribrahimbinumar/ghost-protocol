@@ -14,6 +14,8 @@ func main() {
 	keyFile := flag.String("tls-key", "", "TLS private key (PEM)")
 	data := flag.String("data", "", "path for the accounts snapshot (public keys + invite hashes only)")
 	ttlHours := flag.Int("ttl-hours", 24*7, "how long undelivered ciphertext is kept")
+	ipRate := flag.Float64("ip-rate", 0.5, "sustained requests/second allowed per client address on unauthenticated and auth endpoints")
+	ipBurst := flag.Float64("ip-burst", 30, "burst allowance per client address")
 	insecureDev := flag.Bool("insecure-dev", false, "serve plain HTTP on a loopback address (development only)")
 	flag.Parse()
 
@@ -27,7 +29,9 @@ func main() {
 	if err := st.Load(); err != nil {
 		log.Fatalf("loading snapshot: %v", err)
 	}
-	srv := NewServer(st, DefaultConfig(token))
+	cfg := DefaultConfig(token)
+	cfg.IPRate, cfg.IPBurst = *ipRate, *ipBurst
+	srv := NewServer(st, cfg)
 
 	go func() {
 		for range time.Tick(time.Minute) {
