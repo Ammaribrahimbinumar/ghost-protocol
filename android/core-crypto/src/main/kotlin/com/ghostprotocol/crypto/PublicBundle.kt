@@ -9,7 +9,18 @@ import org.signal.libsignal.protocol.ecc.ECPublicKey
 import org.signal.libsignal.protocol.kem.KEMPublicKey
 import org.signal.libsignal.protocol.state.PreKeyBundle
 
-class OneTimePreKey(val id: Int, val publicKey: ByteArray)
+class OneTimePreKey(val id: Int, val publicKey: ByteArray) {
+    /** 4-byte big-endian id + serialized public key. Stored by the relay as an opaque blob. */
+    fun encode(): ByteArray = java.nio.ByteBuffer.allocate(4 + publicKey.size).putInt(id).put(publicKey).array()
+
+    companion object {
+        fun decode(data: ByteArray): OneTimePreKey {
+            if (data.size <= 4 || data.size > 4 + 4096) throw BundleFormatException("bad one-time prekey")
+            val buf = java.nio.ByteBuffer.wrap(data)
+            return OneTimePreKey(buf.int, data.copyOfRange(4, data.size))
+        }
+    }
+}
 
 /** Thrown when a bundle from the relay is malformed. Treat as hostile input. */
 class BundleFormatException(message: String) : Exception(message)

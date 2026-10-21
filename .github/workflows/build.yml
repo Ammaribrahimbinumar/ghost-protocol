@@ -22,7 +22,21 @@ jobs:
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
       - uses: gradle/actions/setup-gradle@v4
         with: { gradle-version: '8.9' }
-      - name: Unit tests (app + crypto core)
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.24' }
+      - name: Build and start the real relay (loopback, dev mode, synthetic secrets)
+        run: |
+          cd relay && go build -o "$RUNNER_TEMP/ghost-relay" .
+          TOKEN="$(head -c 32 /dev/urandom | base64 | tr -d '\n=+/')"
+          echo "::add-mask::$TOKEN"
+          echo "GHOST_ADMIN_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          GHOST_ADMIN_TOKEN="$TOKEN" nohup "$RUNNER_TEMP/ghost-relay" -insecure-dev -addr 127.0.0.1:8443 > "$RUNNER_TEMP/relay.log" 2>&1 &
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8443/healthz && break; sleep 1; done
+          curl -sS -o /dev/null -w "relay health: %{http_code}\n" http://127.0.0.1:8443/healthz
+      - name: Unit + integration tests (app, crypto core, two clients through the real relay)
+        env:
+          GHOST_RELAY_URL: http://127.0.0.1:8443
+          GHOST_REQUIRE_RELAY: "1"
         run: |
           cd android
           set +e
@@ -33,6 +47,14 @@ jobs:
             python3 "$GITHUB_WORKSPACE/.github/scripts/explain_failure.py" "$RUNNER_TEMP/gradle.log"
           fi
           exit $code
+      - name: Relay log must contain no message text, usernames or mailbox IDs
+        if: always()
+        run: |
+          echo "relay log lines: $(wc -l < "$RUNNER_TEMP/relay.log")"
+          if grep -Eq 'PLAINTEXT-MARKER|alice_|bob_|mallory_' "$RUNNER_TEMP/relay.log"; then
+            echo "::error title=Relay log leak::relay log contains sensitive strings"; exit 1
+          fi
+          echo "::notice title=Relay log::clean ($(wc -c < "$RUNNER_TEMP/relay.log") bytes)"
       - name: Test summary (counts from XML reports)
         if: always()
         run: python3 .github/scripts/summarize_tests.py android

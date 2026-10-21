@@ -9,5 +9,9 @@ kotlin { jvmToolchain(21) }
 
 dependencies {
     api(libs.libsignal.client)
+    implementation(libs.gson)
+    // org.json ships with Android; on the JVM it is needed only for tests.
+    compileOnly(libs.org.json)
+    testImplementation(libs.org.json)
     testImplementation(libs.junit)
 }
