@@ -8,7 +8,7 @@ Written at the end of the first working session. Categories:
 - **BLOCKED** — cannot proceed without something outside this environment.
 
 ## CI result (GitHub Actions, branch `claude/phase2-crypto`, run 39482322352, commit f0c959c)
-On GitHub-hosted runners (ubuntu-24.04, JDK 21, Gradle 8.9, Kotlin 2.2.20): **relay job PASS (go vet + 14 tests, -race); android job PASS: 64 unit tests, 0 failures, 0 skipped (49 app tests + 15 crypto-core tests, counts read from the XML reports).** A debug APK is also built. The APK has not been run on a device; all on-device behaviour (FLAG_SECURE, Keystore, keyboard) remains UNVERIFIED. libsignal itself (the cryptography) is not tested by us beyond using it correctly; its correctness is assumed.
+On GitHub-hosted runners (ubuntu-24.04, JDK 21, Gradle 8.9, Kotlin 2.2.20): **relay job PASS (go vet + 15 tests, -race); android job PASS: 64 unit tests, 0 failures, 0 skipped (49 app tests + 15 crypto-core tests, counts read from the XML reports).** A debug APK is also built. The APK has not been run on a device; all on-device behaviour (FLAG_SECURE, Keystore, keyboard) remains UNVERIFIED. libsignal itself (the cryptography) is not tested by us beyond using it correctly; its correctness is assumed.
 
 ## Phase 3 relay integration (CI run on branch `claude/phase3-relay-client`, commit 8d43344) — TESTED IN CI
 **75 tests, 0 failures, 0 skipped** (49 app + 15 protocol + 5 packet/encoding + 6 relay-integration). CI builds the real Go relay, starts it on loopback, and runs two Kotlin clients (separate identities, separate ECDSA P-256 relay-auth keys) through it over HTTP, then greps the relay's log.
@@ -27,7 +27,7 @@ To unblock: run the build on a machine with Android Studio (or JDK 17 + Android 
 
 ## Relay (Go) — TESTED
 
-Command: `cd relay && go vet ./... && go test -race -count=1 ./...` → 14 tests, all PASS.
+Command: `cd relay && go vet ./... && go test -race -count=1 ./...` → 15 tests, all PASS.
 
 | Feature | Status | Evidence |
 |---|---|---|

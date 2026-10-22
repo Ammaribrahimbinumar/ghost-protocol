@@ -2,7 +2,7 @@
 
 Minimal, stdlib-only Go relay. It stores public key material and opaque encrypted envelopes; it never receives private keys or message keys.
 
-`go vet ./... && go test -race -count=1 ./...` — 14 tests. See `../docs/FEATURE_REPORT.md` for exactly what they cover and their limits.
+`go vet ./... && go test -race -count=1 ./...` — 15 tests. See `../docs/FEATURE_REPORT.md` for exactly what they cover and their limits.
 
 ## API (JSON, TLS 1.3)
 Unauthenticated (rate-limited per hashed IP):
