@@ -28,7 +28,7 @@ var (
 type Account struct {
 	Username       string   `json:"username"`
 	MailboxID      string   `json:"mailbox_id"`
-	AuthPub        []byte   `json:"auth_pub"` // Ed25519, relay authentication only
+	AuthPub        []byte   `json:"auth_pub"` // ECDSA P-256 (X.509 SPKI DER), relay authentication only
 	Bundle         []byte   `json:"bundle"`
 	OneTimePrekeys [][]byte `json:"one_time_prekeys"`
 }
@@ -115,7 +115,7 @@ func (s *Store) Register(invite, username string, authPub, bundle []byte, prekey
 	return mailbox, s.persistLocked()
 }
 
-// AuthKey returns the Ed25519 public key for a mailbox.
+// AuthKey returns the ECDSA P-256 public key (DER) for a mailbox.
 func (s *Store) AuthKey(mailbox string) ([]byte, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

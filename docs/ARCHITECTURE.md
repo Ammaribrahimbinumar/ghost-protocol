@@ -44,7 +44,7 @@ Never implemented by us: any cipher, KDF, ratchet, or key agreement. Platform pr
 | Identifier | Purpose | Who sees it |
 |---|---|---|
 | Identity key pair (per device) | E2EE identity, safety numbers | Contacts, relay (public half, inside bundle) |
-| Relay auth key (Ed25519, separate pair) | Authenticating to relay | Relay |
+| Relay auth key (ECDSA P-256, separate pair, Android Keystore-held) | Authenticating to relay | Relay |
 | Mailbox ID (random 128-bit) | Message routing | Relay, contacts who message you |
 | Username | Human-friendly lookup, *not* a secret | Relay, people who know it |
 

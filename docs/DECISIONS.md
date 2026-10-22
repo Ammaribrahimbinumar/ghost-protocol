@@ -31,4 +31,4 @@ Open blocker: Claude's GitHub app lacks push access to the repo, so each change 
 ## 2026-10-21 (later): Phase 3 relay client
 - Added RelayClient (https only; loopback http only via explicit test flag), Packet format, and 6 integration tests against the real relay in CI (75 tests green, commit 8d43344).
 - Relay gained -ip-rate/-ip-burst flags (defaults unchanged); CI raises them for its loopback test relay because all test clients share one address.
-- OPEN: Ed25519 on Android < API 33 (need Tink/BouncyCastle-class library or change auth scheme); wire core-crypto into the app with libsignal-android; persistent encrypted stores.
+- RESOLVED (2026-10-22): relay request auth changed from Ed25519 to ECDSA P-256 (Android Keystore supports it from API 23, hardware-backed and non-exportable; java.security Ed25519 needs API 33). Relay accepts only P-256 SPKI keys. OPEN: wire core-crypto into the app with libsignal-android; persistent encrypted stores.

@@ -11,9 +11,9 @@ import org.json.JSONObject
 class RelayException(val status: Int, message: String) : Exception(message)
 
 /**
- * Signs relay requests with the device's relay-auth key (Ed25519), which is separate from the
- * Signal identity key. The platform implementation is pending: Ed25519 in java.security needs
- * Android API 33, but minSdk is 26, so the app will need a library implementation. Tests use the JDK's.
+ * Signs relay requests with the device's relay-auth key, which is separate from the Signal
+ * identity key. Scheme: ECDSA P-256 / SHA-256, DER signature; public key as X.509 SPKI DER
+ * (see [EcdsaP256Signer]).
  */
 interface RequestSigner {
     val publicKey: ByteArray

@@ -9,7 +9,7 @@
 |---|---|---|---|
 | Identity key (per device) | On device, by libsignal | Wrapped by a Keystore key | E2EE identity, safety numbers |
 | Signed/one-time/post-quantum prekeys | On device | Private halves in encrypted DB; public halves on relay | Session setup |
-| Relay auth key (Ed25519) | On device | Keystore-wrapped | Signs relay requests; separate from identity key |
+| Relay auth key (ECDSA P-256) | On device, inside Android Keystore (StrongBox/TEE where available) | Non-exportable; private key never visible to app code | Signs relay requests; separate from identity key |
 | Database key (256-bit random) | On device | Wrapped by Keystore AES-GCM key | SQLCipher |
 | Per-attachment key (256-bit random) | Per file | In the encrypted message record, and sent inside the E2EE message | Attachment AEAD |
 

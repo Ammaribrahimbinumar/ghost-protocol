@@ -2,8 +2,11 @@ package main
 
 import (
 	"bytes"
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
@@ -75,19 +78,19 @@ func (e *env) invite() string {
 type client struct {
 	e       *env
 	name    string
-	pub     ed25519.PublicKey
-	priv    ed25519.PrivateKey
+	pub     []byte
+	priv    *ecdsa.PrivateKey
 	mailbox string
 }
 
-func (e *env) registerReq(invite, username string, pub ed25519.PublicKey, prekeys [][]byte) *http.Response {
+func (e *env) registerReq(invite, username string, pub []byte, prekeys [][]byte) *http.Response {
 	body, _ := json.Marshal(registerReq{Invite: invite, Username: username, AuthPub: pub, Bundle: []byte("synthetic-public-bundle-" + username), Prekeys: prekeys})
 	return e.raw("POST", "/v1/register", body, nil)
 }
 
 func (e *env) newUser(name string, prekeys ...[]byte) *client {
 	e.t.Helper()
-	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	pub, priv := newAuthKey(e.t)
 	resp := e.registerReq(e.invite(), name, pub, prekeys)
 	defer resp.Body.Close()
 	if resp.StatusCode != 201 {
@@ -98,9 +101,27 @@ func (e *env) newUser(name string, prekeys ...[]byte) *client {
 	return &client{e: e, name: name, pub: pub, priv: priv, mailbox: out["mailbox_id"]}
 }
 
-func sigHeaders(mailbox string, priv ed25519.PrivateKey, method, path string, body []byte, ts int64, nonce string) map[string]string {
+// newAuthKey returns a fresh ECDSA P-256 key: the public half as X.509 SPKI DER (what the relay stores).
+func newAuthKey(t *testing.T) ([]byte, *ecdsa.PrivateKey) {
+	t.Helper()
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509.MarshalPKIXPublicKey(&priv.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return der, priv
+}
+
+func sigHeaders(mailbox string, priv *ecdsa.PrivateKey, method, path string, body []byte, ts int64, nonce string) map[string]string {
 	tss := strconv.FormatInt(ts, 10)
-	sig := ed25519.Sign(priv, canonical(method, path, tss, nonce, body))
+	digest := sha256.Sum256(canonical(method, path, tss, nonce, body))
+	sig, err := ecdsa.SignASN1(rand.Reader, priv, digest[:])
+	if err != nil {
+		panic(err)
+	}
 	return map[string]string{
 		"X-Mailbox": mailbox, "X-Timestamp": tss, "X-Nonce": nonce,
 		"X-Signature": base64.StdEncoding.EncodeToString(sig),
@@ -129,7 +150,7 @@ func status(t *testing.T, resp *http.Response, want int) {
 
 func TestInviteSingleUseAndUsernameCollision(t *testing.T) {
 	e := newEnv(t, nil)
-	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	pub, _ := newAuthKey(t)
 	inv := e.invite()
 	status(t, e.registerReq(inv, "alice", pub, nil), 201)
 	status(t, e.registerReq(inv, "alice2", pub, nil), 403) // invite already consumed
@@ -141,6 +162,32 @@ func TestInviteSingleUseAndUsernameCollision(t *testing.T) {
 	status(t, e.registerReq("not-a-real-invite", "carol", pub, nil), 403)
 	status(t, e.registerReq(e.invite(), "A!", pub, nil), 400)        // bad username
 	status(t, e.registerReq(e.invite(), "dave", pub[:10], nil), 400) // bad key length
+}
+
+func TestRegisterRejectsWrongKeyTypesAndMalformedKeys(t *testing.T) {
+	e := newEnv(t, nil)
+	good, _ := newAuthKey(t)
+	p384, _ := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	p384der, _ := x509.MarshalPKIXPublicKey(&p384.PublicKey)
+	edPub, _, _ := ed25519.GenerateKey(rand.Reader)
+	edDer, _ := x509.MarshalPKIXPublicKey(edPub)
+	cases := map[string][]byte{
+		"P-384 key":      p384der,
+		"Ed25519 key":    edDer,
+		"empty":          nil,
+		"garbage":        bytes.Repeat([]byte{0x7f}, 91),
+		"truncated":      good[:len(good)-5],
+		"trailing data":  append(append([]byte{}, good...), 0),
+		"oversized":      bytes.Repeat([]byte{1}, 400),
+		"raw point only": good[len(good)-65:],
+	}
+	i := 0
+	for name, k := range cases {
+		i++
+		status(t, e.registerReq(e.invite(), "user_"+strconv.Itoa(i), k, nil), 400)
+		_ = name
+	}
+	status(t, e.registerReq(e.invite(), "gooduser", good, nil), 201) // control: a valid P-256 key is accepted
 }
 
 func TestAdminInviteRequiresToken(t *testing.T) {
@@ -202,7 +249,7 @@ func TestOpaqueRoundTripAndAck(t *testing.T) {
 func TestAuthRejections(t *testing.T) {
 	e := newEnv(t, nil)
 	alice, bob, carol := e.newUser("alice"), e.newUser("bob"), e.newUser("carol")
-	_, otherPriv, _ := ed25519.GenerateKey(rand.Reader)
+	_, otherPriv := newAuthKey(t)
 	path := "/v1/send/" + bob.mailbox
 	body := []byte("payload")
 	now := e.clock.Unix()
@@ -337,7 +384,7 @@ func TestNothingSensitiveIsLogged(t *testing.T) {
 
 	e := newEnv(t, nil)
 	invite := e.invite()
-	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
+	pub, priv := newAuthKey(t)
 	status(t, e.registerReq(invite, "loguser", pub, nil), 201)
 	status(t, e.registerReq(invite, "loguser2", pub, nil), 403) // error paths too
 	other := e.newUser("otheruser")
@@ -370,7 +417,7 @@ func TestPersistenceStoresNoCiphertextAndNoRawInvites(t *testing.T) {
 		t.Fatal(err)
 	}
 	used, _ := st.CreateInvite()
-	pub, _, _ := ed25519.GenerateKey(rand.Reader)
+	pub, _ := newAuthKey(t)
 	mb, err := st.Register(used, "alice", pub, []byte("bundle"), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -405,7 +452,7 @@ func TestPersistenceStoresNoCiphertextAndNoRawInvites(t *testing.T) {
 	if len(st2.Inbox(mb)) != 0 {
 		t.Fatal("queued ciphertext survived restart; queues must be memory-only")
 	}
-	pub2, _, _ := ed25519.GenerateKey(rand.Reader)
+	pub2, _ := newAuthKey(t)
 	if _, err := st2.Register(spare, "bob", pub2, []byte("b"), nil); err != nil {
 		t.Fatalf("unused invite not restored: %v", err)
 	}

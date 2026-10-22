@@ -1,11 +1,13 @@
 package main
 
 import (
-	"crypto/ed25519"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -23,6 +25,7 @@ import (
 const (
 	maxRegisterBody = 512 << 10
 	maxBundle       = 8 << 10
+	maxAuthPub      = 200
 	maxPrekey       = 4 << 10
 	maxPrekeyBatch  = 100
 	maxPrekeysTotal = 200
@@ -241,6 +244,29 @@ type registerReq struct {
 	Prekeys  [][]byte `json:"one_time_prekeys"`
 }
 
+// parseAuthKey accepts only an ECDSA P-256 public key in X.509 SubjectPublicKeyInfo DER form, which
+// is what Android Keystore and the JDK produce from PublicKey.getEncoded(). Any other key type,
+// curve, trailing data or garbage is refused.
+func parseAuthKey(der []byte) (*ecdsa.PublicKey, bool) {
+	if len(der) == 0 || len(der) > maxAuthPub {
+		return nil, false
+	}
+	k, err := x509.ParsePKIXPublicKey(der)
+	if err != nil {
+		return nil, false
+	}
+	pk, ok := k.(*ecdsa.PublicKey)
+	if !ok || pk.Curve != elliptic.P256() {
+		return nil, false
+	}
+	return pk, true
+}
+
+func validAuthKey(der []byte) bool {
+	_, ok := parseAuthKey(der)
+	return ok
+}
+
 func validPrekeys(p [][]byte) bool {
 	if len(p) > maxPrekeyBatch {
 		return false
@@ -263,7 +289,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	if !usernameRE.MatchString(req.Username) || len(req.AuthPub) != ed25519.PublicKeySize ||
+	if !usernameRE.MatchString(req.Username) || !validAuthKey(req.AuthPub) ||
 		len(req.Bundle) == 0 || len(req.Bundle) > maxBundle || !validPrekeys(req.Prekeys) || req.Invite == "" {
 		fail(w, http.StatusBadRequest, "bad request")
 		return
@@ -341,7 +367,7 @@ func (s *Server) auth(h authedHandler) http.HandlerFunc {
 			return
 		}
 		sig, err := base64.StdEncoding.DecodeString(sigB64)
-		if err != nil || len(sig) != ed25519.SignatureSize {
+		if err != nil || len(sig) < 8 || len(sig) > 80 {
 			deny()
 			return
 		}
@@ -350,7 +376,13 @@ func (s *Server) auth(h authedHandler) http.HandlerFunc {
 			fail(w, http.StatusRequestEntityTooLarge, "too large")
 			return
 		}
-		if !ed25519.Verify(ed25519.PublicKey(pub), canonical(r.Method, r.URL.Path, ts, nonce, body), sig) {
+		pk, okKey := parseAuthKey(pub)
+		if !okKey {
+			deny()
+			return
+		}
+		digest := sha256.Sum256(canonical(r.Method, r.URL.Path, ts, nonce, body))
+		if !ecdsa.VerifyASN1(pk, digest[:], sig) {
 			deny()
 			return
 		}

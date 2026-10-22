@@ -2,9 +2,7 @@ package com.ghostprotocol.crypto
 
 import java.net.HttpURLConnection
 import java.net.URL
-import java.security.KeyPairGenerator
 import java.security.SecureRandom
-import java.security.Signature
 import org.json.JSONObject
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -18,14 +16,6 @@ import org.junit.Before
 import org.junit.Test
 import org.signal.libsignal.protocol.DuplicateMessageException
 import org.signal.libsignal.protocol.SignalProtocolAddress
-
-/** Test-only Ed25519 signer using the JDK (Android would use a library; see RequestSigner). */
-class JdkEd25519Signer : RequestSigner {
-    private val pair = KeyPairGenerator.getInstance("Ed25519").generateKeyPair()
-    override val publicKey: ByteArray = pair.public.encoded.let { it.copyOfRange(it.size - 32, it.size) }
-    override fun sign(message: ByteArray): ByteArray =
-        Signature.getInstance("Ed25519").apply { initSign(pair.private); update(message) }.sign()
-}
 
 /**
  * Two clients exchange messages through the REAL relay process (built from ../relay).
@@ -49,7 +39,7 @@ class RelayIntegrationTest {
         val name = label + "_" + java.lang.Long.toHexString(SecureRandom().nextLong()).take(8)
         val device = LocalDevice.create(name)
         val messenger = Messenger(device)
-        val signer = JdkEd25519Signer()
+        val signer = EcdsaP256Signer.generateSoftware()
         val client = RelayClient(url!!, signer, allowLoopbackHttpForTests = true)
         val address: SignalProtocolAddress get() = device.address
         val mailbox: String
@@ -177,7 +167,7 @@ class RelayIntegrationTest {
         val anon = RelayClient(url!!, null, allowLoopbackHttpForTests = true)
         assertEquals(0, assertThrows(RelayException::class.java) { anon.send(bob.mailbox, byteArrayOf(1, 2, 3)) }.status)
         // Wrong key: Alice's mailbox but a different signer.
-        val impostor = RelayClient(url, JdkEd25519Signer(), alice.mailbox, allowLoopbackHttpForTests = true)
+        val impostor = RelayClient(url, EcdsaP256Signer.generateSoftware(), alice.mailbox, allowLoopbackHttpForTests = true)
         assertEquals(401, assertThrows(RelayException::class.java) { impostor.send(bob.mailbox, byteArrayOf(1, 2, 3)) }.status)
         assertEquals(401, assertThrows(RelayException::class.java) { impostor.inbox() }.status)
         // Oversized payload.

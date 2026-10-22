@@ -10,7 +10,7 @@ Read together with `THREAT_MODEL.md` and `FEATURE_REPORT.md`.
 ## Known gaps in the current implementation
 - The sender username is sent in clear inside each packet and the relay sees which mailbox sent it. Sealed sender is not implemented.
 - First contact is trust-on-first-use: a malicious relay can substitute keys at first contact; only comparing safety numbers detects it (tested: the numbers differ).
-- The relay-auth key needs an Ed25519 implementation that works on Android 8+ (java.security Ed25519 requires API 33). Not yet implemented.
+- The relay-auth key is ECDSA P-256 so it can live in Android Keystore on every supported phone (minSdk 26). The Keystore-backed key class is written in the crypto core only as a generic signer; creating the hardware-backed key in the app is not yet implemented, and the real hardware backing is unverified until tested on devices.
 
 ## Inherent limits (even when finished)
 - **Not undetectable.** Android exposes the package name, permissions, notifications and network connections. The calculator label is a discretion measure only.
