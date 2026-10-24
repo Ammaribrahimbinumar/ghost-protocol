@@ -10,7 +10,6 @@ import org.signal.libsignal.protocol.kem.KEMKeyType
 import org.signal.libsignal.protocol.state.KyberPreKeyRecord
 import org.signal.libsignal.protocol.state.PreKeyRecord
 import org.signal.libsignal.protocol.state.SignedPreKeyRecord
-import org.signal.libsignal.protocol.state.impl.InMemorySignalProtocolStore
 
 /**
  * One device's cryptographic identity and key stores.
@@ -18,17 +17,18 @@ import org.signal.libsignal.protocol.state.impl.InMemorySignalProtocolStore
  * All key generation, signing, session setup and encryption are delegated to libsignal
  * (Signal protocol: PQXDH + Double Ratchet). This class only wires those calls together.
  *
- * STORAGE LIMIT: the store is in memory only. Persisting it in an encrypted database wrapped by
- * an Android Keystore key is Phase 4. Until then, nothing here survives a process restart.
+ * PERSISTENCE: state lives in a [PersistentSignalStore]; pass `onChange` to receive an up-to-date
+ * snapshot after every change and write it ONLY to encrypted storage. [restore] reloads it.
  */
 class LocalDevice private constructor(
     val name: String,
     val deviceId: Int,
-    internal val store: InMemorySignalProtocolStore,
-    private val signedPreKey: SignedPreKeyRecord,
-    private val kyberPreKey: KyberPreKeyRecord,
-    private val oneTimePreKeys: List<PreKeyRecord>,
+    internal val store: PersistentSignalStore,
 ) {
+    private val signedPreKey: SignedPreKeyRecord get() = store.loadSignedPreKey(1)
+    private val kyberPreKey: KyberPreKeyRecord get() = store.loadKyberPreKey(1)
+    private val oneTimePreKeys: List<PreKeyRecord> get() = store.allPreKeys()
+
     val address: SignalProtocolAddress = SignalProtocolAddress(name, deviceId)
     val identityKey: IdentityKey get() = store.identityKeyPair.publicKey
     val registrationId: Int get() = store.localRegistrationId
@@ -53,11 +53,12 @@ class LocalDevice private constructor(
     companion object {
         private val random = SecureRandom()
 
-        fun create(name: String, deviceId: Int = 1, oneTimePreKeyCount: Int = 20): LocalDevice {
+        fun create(name: String, deviceId: Int = 1, oneTimePreKeyCount: Int = 20, onChange: (ByteArray) -> Unit = {}): LocalDevice {
             require(name.isNotEmpty() && oneTimePreKeyCount in 0..100)
             val identity = IdentityKeyPair.generate()
             val registrationId = random.nextInt(16380) + 1
-            val store = InMemorySignalProtocolStore(identity, registrationId)
+            var sink: (ByteArray) -> Unit = {}          // silent while generating, then one write
+            val store = PersistentSignalStore.create(identity, registrationId) { sink(it) }
             val now = System.currentTimeMillis()
 
             val signedPair = ECKeyPair.generate()
@@ -70,12 +71,19 @@ class LocalDevice private constructor(
                 1, now, kyberPair,
                 identity.privateKey.calculateSignature(kyberPair.publicKey.serialize()),
             )
-            val oneTime = (1..oneTimePreKeyCount).map { PreKeyRecord(it, ECKeyPair.generate()) }
-
             store.storeSignedPreKey(signed.id, signed)
             store.storeKyberPreKey(kyber.id, kyber)
-            oneTime.forEach { store.storePreKey(it.id, it) }
-            return LocalDevice(name, deviceId, store, signed, kyber, oneTime)
+            (1..oneTimePreKeyCount).forEach { store.storePreKey(it, PreKeyRecord(it, ECKeyPair.generate())) }
+            sink = onChange
+            onChange(store.snapshot())
+            return LocalDevice(name, deviceId, store)
+        }
+
+        /** Reload a device from a snapshot produced via `onChange`. Throws [StoreFormatException] on any damage. */
+        fun restore(name: String, snapshot: ByteArray, deviceId: Int = 1, onChange: (ByteArray) -> Unit = {}): LocalDevice {
+            val store = PersistentSignalStore.restore(snapshot, onChange)
+            if (!store.containsSignedPreKey(1) || !store.containsKyberPreKey(1)) throw StoreFormatException("missing prekeys")
+            return LocalDevice(name, deviceId, store)
         }
     }
 }
