@@ -48,6 +48,7 @@ android {
     }
 
     compileOptions {
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -69,6 +70,7 @@ dependencies {
     // Android native libraries instead. AGPL-3.0, see docs/ARCHITECTURE.md.
     implementation(project(":core-crypto")) { exclude(group = "org.signal", module = "libsignal-client") }
     implementation(libs.libsignal.android)
+    coreLibraryDesugaring(libs.desugar)
     // Phase 4 (not yet integrated): net.zetetic:sqlcipher-android + androidx.room
 
     testImplementation(libs.junit)
