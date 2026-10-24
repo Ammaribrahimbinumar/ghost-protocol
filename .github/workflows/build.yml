@@ -90,7 +90,7 @@ jobs:
           api-level: 34
           arch: x86_64
           target: google_apis
-          script: cd android && gradle --no-daemon :app:connectedDebugAndroidTest --stacktrace
+          script: sh .github/scripts/run_device_tests.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:
