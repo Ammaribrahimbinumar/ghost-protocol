@@ -14,3 +14,8 @@
 | Per-attachment key (256-bit random) | Per file | In the encrypted message record, and sent inside the E2EE message | Attachment AEAD |
 
 Rules: private keys never leave the device or go to the relay; purposes use separate keys; no key in preferences, logs or source; rotation of prekeys on schedule and after suspected compromise; identity-key changes always surface a warning.
+
+## Update 2026-10-24 (implemented, CI-tested on JVM and emulator; NOT run on a physical phone)
+- **Signal identity, prekeys (incl. post-quantum), sessions, pinned contact identities:** `PersistentSignalStore` serializes the full state after every change; `DeviceVault` writes it through `KeystoreSecretStore` (AES-256-GCM, non-exportable Keystore key, atomic file, excluded from backup). A missing/tampered file or missing Keystore key raises an error; the app never silently makes a new identity.
+- **Relay auth key:** ECDSA P-256 generated inside Android Keystore (`KeystoreRelaySigner`), StrongBox if present. Whether a given phone backs it with secure hardware is UNVERIFIED (emulator is software).
+- Limits: the snapshot is one file rewritten on each change (no per-record DB yet); the Keystore wrapping key is not tied to user authentication, so it protects against file extraction/backup, not against code running as the app on an unlocked, compromised device; the decoy/duress wipe is not implemented.
