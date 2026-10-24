@@ -20,6 +20,7 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0-phase1"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     // Signing material is supplied from the environment / a local, untracked
@@ -64,9 +65,17 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.kotlinx.coroutines.android)
 
-    // Phase 2 (not yet integrated): org.signal:libsignal-android  (AGPL-3.0, see docs/ARCHITECTURE.md)
+    // Protocol core. libsignal-client (desktop JVM natives) is excluded; libsignal-android carries the
+    // Android native libraries instead. AGPL-3.0, see docs/ARCHITECTURE.md.
+    implementation(project(":core-crypto")) { exclude(group = "org.signal", module = "libsignal-client") }
+    implementation(libs.libsignal.android)
     // Phase 4 (not yet integrated): net.zetetic:sqlcipher-android + androidx.room
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+
+    androidTestImplementation(libs.junit)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.core)
 }
