@@ -48,7 +48,7 @@ class GhostClientRelayTest {
         alice.restart(); bob.restart()
         alice.client.send(bob.name, "after restart")
         assertEquals(1, bob.client.poll().received)
-        assertEquals(listOf("secret one", "after restart"), bob.client.messages(alice.name).map { it.text })
+        assertEquals(listOf("secret one", "after restart"), bob.client.messages(alice.name).filter { !it.outgoing }.map { it.text })
         assertEquals(0, bob.client.poll().received)   // acked: nothing left in the inbox
     }
 
