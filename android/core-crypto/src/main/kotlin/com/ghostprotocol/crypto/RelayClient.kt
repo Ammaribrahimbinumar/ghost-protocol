@@ -20,6 +20,14 @@ interface RequestSigner {
     fun sign(message: ByteArray): ByteArray
 }
 
+/** The relay operations the messaging client needs (lets tests substitute a hostile or broken relay). */
+interface RelayApi {
+    override fun fetchBundle(username: String): FetchedBundle
+    override fun send(recipientMailbox: String, payload: ByteArray)
+    override fun inbox(): List<Delivered>
+    override fun ack(ids: List<String>)
+}
+
 class FetchedBundle(val mailboxId: String, val bundle: ByteArray, val oneTimePreKey: ByteArray?)
 class Delivered(val id: String, val body: ByteArray)
 
@@ -32,7 +40,7 @@ class RelayClient(
     private val signer: RequestSigner? = null,
     var mailboxId: String? = null,
     allowLoopbackHttpForTests: Boolean = false,
-) {
+) : RelayApi {
     private val base = baseUrl.trimEnd('/')
     private val random = SecureRandom()
     private val b64 = Base64.getEncoder()
@@ -54,7 +62,7 @@ class RelayClient(
         return resp.getString("mailbox_id").also { mailboxId = it }
     }
 
-    fun fetchBundle(username: String): FetchedBundle {
+    override fun fetchBundle(username: String): FetchedBundle {
         val r = JSONObject(String(call("GET", "/v1/bundle/$username", null, auth = false)))
         return FetchedBundle(
             r.getString("mailbox_id"), dec.decode(r.getString("bundle")),
@@ -62,11 +70,11 @@ class RelayClient(
         )
     }
 
-    fun send(recipientMailbox: String, payload: ByteArray) {
+    override fun send(recipientMailbox: String, payload: ByteArray) {
         call("POST", "/v1/send/$recipientMailbox", payload, auth = true)
     }
 
-    fun inbox(): List<Delivered> {
+    override fun inbox(): List<Delivered> {
         val arr = JSONObject(String(call("GET", "/v1/inbox", null, auth = true))).getJSONArray("messages")
         return (0 until arr.length()).map {
             val m = arr.getJSONObject(it)
@@ -74,7 +82,7 @@ class RelayClient(
         }
     }
 
-    fun ack(ids: List<String>) {
+    override fun ack(ids: List<String>) {
         call("POST", "/v1/ack", JSONObject().put("ids", JSONArray(ids)).toString().toByteArray(), auth = true)
     }
 

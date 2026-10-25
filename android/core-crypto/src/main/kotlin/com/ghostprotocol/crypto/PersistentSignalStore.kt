@@ -72,6 +72,11 @@ class PersistentSignalStore private constructor(
 
     @Synchronized override fun getIdentity(address: SignalProtocolAddress): IdentityKey? = identities[key(address)]
 
+    /** Explicit user decision after a key-change warning: forget the pinned identity and session for [address]. */
+    @Synchronized fun forgetContact(address: SignalProtocolAddress) {
+        identities.remove(key(address)); sessions.remove(key(address)); changed()
+    }
+
     // ---- one-time prekeys ----
     @Synchronized override fun loadPreKey(id: Int): PreKeyRecord = preKeys[id] ?: throw InvalidKeyIdException("no prekey $id")
     @Synchronized override fun storePreKey(id: Int, record: PreKeyRecord) { preKeys[id] = record; changed() }

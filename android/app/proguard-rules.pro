@@ -6,3 +6,4 @@
     public static int w(...);
     public static int e(...);
 }
+-keep class com.ghostprotocol.crypto.** { *; }
