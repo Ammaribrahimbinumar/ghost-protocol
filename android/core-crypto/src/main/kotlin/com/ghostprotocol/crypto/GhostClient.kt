@@ -106,7 +106,6 @@ class GhostClient(
                 val plain = try {
                     messenger.decrypt(addr(sender), envelope)
                 } catch (e: UntrustedIdentityException) {
-                    if (known != null) put(known.copy(keyChanged = true))
                     changes += sender; save(); dropped++; toAck += d.id; continue
                 }
                 if (known == null) {
