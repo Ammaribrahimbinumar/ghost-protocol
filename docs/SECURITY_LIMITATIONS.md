@@ -28,3 +28,12 @@ Read together with `THREAT_MODEL.md` and `FEATURE_REPORT.md`.
 ## Library constraints
 - `libsignal` is AGPL-3.0 and states that use outside Signal is unsupported and its API may change without notice. Distributing the APK to invitees means they must be able to obtain the app's source.
 - Library versions in the project are unverified placeholders until resolved on a networked machine.
+
+## Added 2026-10-26 (messaging client)
+- Keys and decrypted messages stay in process memory while the app process lives; locking hides the UI and clears UI state but does not wipe memory or the Signal store. Rooted/instrumented devices can read them.
+- The relay sees sender username, recipient mailbox, size and timing for every message (sealed sender NOT implemented) and the account list.
+- Trust-on-first-use: the first identity key seen for a username is pinned; a malicious relay present at first contact could substitute keys until users compare safety numbers (the UI makes this a one-tap flow but it is manual).
+- A tunnel service used for testing can see connection metadata. Use your own server + certificate for anything real.
+- Debug builds permit cleartext to 127.0.0.1 only (for emulator tests); release config does not.
+- No notifications and no background fetching: messages arrive only while the app is open and unlocked.
+- Chat state snapshot is a single file rewritten on every change; a crash mid-write is handled by Android AtomicFile, but large histories will be slow.
