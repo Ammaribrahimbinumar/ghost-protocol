@@ -85,6 +85,16 @@ jobs:
           sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
       - uses: gradle/actions/setup-gradle@v4
         with: { gradle-version: '8.9' }
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.24' }
+      - name: Build and start the real relay (loopback, dev mode, synthetic secrets)
+        run: |
+          cd relay && go build -o "$RUNNER_TEMP/ghost-relay" .
+          TOKEN="$(head -c 32 /dev/urandom | base64 | tr -d '\n=+/')"
+          echo "::add-mask::$TOKEN"
+          echo "GHOST_ADMIN_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          GHOST_ADMIN_TOKEN="$TOKEN" nohup "$RUNNER_TEMP/ghost-relay" -insecure-dev -addr 127.0.0.1:8443 -ip-rate 1000 -ip-burst 5000 > "$RUNNER_TEMP/relay.log" 2>&1 &
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8443/healthz && break; sleep 1; done
       - uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34

@@ -20,6 +20,8 @@ import java.security.spec.ECGenParameterSpec
 object KeystoreRelaySigner {
     private const val ALIAS = "ghost_relay_auth_p256"
 
+    fun exists(): Boolean = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.containsAlias(ALIAS)
+
     fun getOrCreate(): EcdsaP256Signer {
         val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         if (!ks.containsAlias(ALIAS)) generate()

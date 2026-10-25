@@ -4,6 +4,7 @@ import android.content.Context
 import com.ghostprotocol.crypto.LocalDevice
 import com.ghostprotocol.crypto.StoreFormatException
 import java.io.File
+import java.security.KeyStore
 
 /**
  * Owns this phone's Signal identity and sessions. All state is written, after every change, through
@@ -12,7 +13,8 @@ import java.io.File
  * identity (that would look to contacts like a stolen or reinstalled account).
  */
 class DeviceVault(context: Context, private val alias: String = DEFAULT_ALIAS, fileName: String = "device.state") {
-    private val store: SecretStore = KeystoreSecretStore(File(context.filesDir, fileName), alias)
+    private val file = File(context.filesDir, fileName)
+    private val store: SecretStore = KeystoreSecretStore(file, alias)
 
     fun exists(): Boolean = store.read() != null
 
@@ -26,6 +28,12 @@ class DeviceVault(context: Context, private val alias: String = DEFAULT_ALIAS, f
     fun load(username: String): LocalDevice {
         val snap = store.read() ?: throw StoreCorruptedException("no device state")
         return LocalDevice.restore(username, snap, onChange = { store.write(it) })
+    }
+
+    /** Deletes the identity file and its Keystore key. Only for rolling back a failed registration. */
+    fun destroy() {
+        file.delete()
+        runCatching { KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.deleteEntry(alias) }
     }
 
     companion object { const val DEFAULT_ALIAS = "ghost_device_state_key" }

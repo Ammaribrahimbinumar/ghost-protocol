@@ -67,7 +67,7 @@ internal fun KeyRow(content: @Composable RowScope.() -> Unit) {
 }
 
 private val LETTER_ROWS = listOf("qwertyuiop", "asdfghjkl", "zxcvbnm")
-private val SYMBOL_ROWS = listOf("1234567890", "-/:;()$&@\"", ".,?!'#%+=")
+private val SYMBOL_ROWS = listOf("1234567890", "-/:;()_&@\"", ".,?!'#%+=")
 
 /**
  * In-app keyboard drawn entirely by this app. No input method editor is ever invoked for message

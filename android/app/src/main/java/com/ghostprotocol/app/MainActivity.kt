@@ -19,7 +19,8 @@ import com.ghostprotocol.app.ui.CalculatorScreen
 import com.ghostprotocol.app.ui.GhostTheme
 import com.ghostprotocol.app.ui.SetupScreen
 import com.ghostprotocol.app.ui.StoreCorruptedScreen
-import com.ghostprotocol.app.ui.UnlockedPlaceholder
+import com.ghostprotocol.app.ui.MessagingApp
+import com.ghostprotocol.app.messaging.AppController
 import java.io.File
 
 /**
@@ -31,6 +32,7 @@ class MainActivity : ComponentActivity() {
     private var unlocked by mutableStateOf(false)
     private var findings by mutableStateOf<List<RiskFinding>>(emptyList())
     private lateinit var controller: CalculatorController
+    private lateinit var app: AppController
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -39,6 +41,7 @@ class MainActivity : ComponentActivity() {
         val store = KeystoreSecretStore(File(filesDir, "unlock.rec"), alias = "ghost_unlock_v1")
         val verifier = UnlockVerifier(store)
         controller = CalculatorController(verifier)
+        app = AppController(applicationContext).also { it.start() }
 
         var corrupted = false
         var configured = false
@@ -59,14 +62,9 @@ class MainActivity : ComponentActivity() {
                         findings = RiskCheck.scan(this@MainActivity)
                         unlocked = true
                     }
-                    else -> UnlockedPlaceholder(
-                        findings = findings,
-                        // Default is warn-only: TalkBack and other legitimate accessibility tools
-                        // can read the screen, and blocking them by default would lock out
-                        // users who rely on them. Make this a user setting before shipping.
-                        blocked = RiskCheck.blocks(findings, RiskPolicy.WARN_ONLY),
-                        onLock = ::lockNow,
-                    )
+                    // Default is warn-only: TalkBack and other legitimate accessibility tools can read the screen,
+                    // and blocking them by default would lock out users who rely on them.
+                    else -> MessagingApp(app, findings, onLock = ::lockNow)
                 }
             }
         }
@@ -81,5 +79,6 @@ class MainActivity : ComponentActivity() {
     private fun lockNow() {
         unlocked = false
         controller.lock()
+        app.lock()
     }
 }
