@@ -123,7 +123,7 @@ class GhostClient(
                 st.messages.add(StoredMessage(newId(), sender, false, String(plain, Charsets.UTF_8), now, if (ttl > 0) now + ttl * 1000 else 0))
                 received++; toAck += d.id
             } catch (e: java.io.IOException) {
-                throw e // transient: leave unacked, retry later
+                dropped++; toAck += d.id
             } catch (e: RelayException) {
                 throw e
             } catch (e: Exception) {
