@@ -22,10 +22,10 @@ interface RequestSigner {
 
 /** The relay operations the messaging client needs (lets tests substitute a hostile or broken relay). */
 interface RelayApi {
-    override fun fetchBundle(username: String): FetchedBundle
-    override fun send(recipientMailbox: String, payload: ByteArray)
-    override fun inbox(): List<Delivered>
-    override fun ack(ids: List<String>)
+    fun fetchBundle(username: String): FetchedBundle
+    fun send(recipientMailbox: String, payload: ByteArray)
+    fun inbox(): List<Delivered>
+    fun ack(ids: List<String>)
 }
 
 class FetchedBundle(val mailboxId: String, val bundle: ByteArray, val oneTimePreKey: ByteArray?)
