@@ -10,6 +10,7 @@ class FakeRelay : RelayApi {
     val boxes = mutableMapOf<String, MutableList<Delivered>>()
     val acked = mutableListOf<String>()
     var failInbox = false
+    var failFetch = false
     private var n = 0
     var current: String = ""      // mailbox of whoever is calling
 
@@ -23,6 +24,7 @@ class FakeRelay : RelayApi {
     private var bundleOverride = mutableMapOf<String, LocalDevice>()
     fun impersonate(name: String, d: LocalDevice) { bundleOverride[name] = d; accounts[name]!!.let { accounts[name] = Account(it.mailbox, d) } }
     override fun fetchBundle(username: String): FetchedBundle {
+        if (failFetch) throw java.io.IOException("offline")
         val a = accounts[username] ?: throw RelayException(404, "no such user")
         return FetchedBundle(a.mailbox, a.device.publicBundle().encode(), a.device.oneTimePreKeyList().firstOrNull()?.encode())
     }
@@ -101,6 +103,20 @@ class GhostClientTest {
         assertTrue(relay.acked.isEmpty())
         relay.failInbox = false
         assertEquals(1, bob.client.poll().received)
+    }
+
+    @Test fun mailboxLookupFailureForNewSenderDoesNotLoseTheMessage() {
+        alice.client.addContact("bob_xyz"); alice.client.send("bob_xyz", "first")
+        relay.failFetch = true
+        val r = bob.client.poll()                                         // lookup of alice's mailbox fails mid-poll
+        assertEquals(1, r.received)
+        assertEquals(listOf("<first"), texts(bob, "alice_x"))
+        assertEquals(0, relay.boxes[relay.accounts["bob_xyz"]!!.mailbox]!!.size)   // acked, not stuck
+        assertThrows(java.io.IOException::class.java) { bob.client.send("alice_x", "x") }
+        relay.failFetch = false
+        bob.client.send("alice_x", "reply")                               // mailbox resolved lazily
+        alice.client.poll()
+        assertEquals(listOf(">first", "<reply"), texts(alice, "bob_xyz"))
     }
 
     @Test fun keyChangeIsBlockedUntilUserAccepts() {

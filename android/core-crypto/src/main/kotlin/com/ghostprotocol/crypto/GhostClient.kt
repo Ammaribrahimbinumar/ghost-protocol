@@ -82,8 +82,10 @@ class GhostClient(
     }
 
     @Synchronized fun send(name: String, text: String): StoredMessage {
-        val c = contact(name) ?: throw UnknownContactException(name)
-        if (c.keyChanged) throw KeyChangedException(name)
+        val c0 = contact(name) ?: throw UnknownContactException(name)
+        if (c0.keyChanged) throw KeyChangedException(name)
+        if (c0.mailboxId.isEmpty() && !resolveMailbox(name)) throw KeyChangedException(name)
+        val c = contact(name)!!
         require(text.isNotEmpty() && text.length <= 4000) { "message length" }
         val envelope = messenger.encrypt(addr(name), text.toByteArray(Charsets.UTF_8))
         relay.send(c.mailboxId, Packet.encode(username, envelope))
@@ -110,22 +112,16 @@ class GhostClient(
                     changes += sender; save(); dropped++; toAck += d.id; continue
                 }
                 if (known == null) {
-                    // First message from someone new: learn their mailbox so we can reply, and confirm the
-                    // identity on the relay's bundle matches the one libsignal just pinned from the message.
-                    val f = relay.fetchBundle(sender)
-                    val relayIdentity = IdentityKey(org.signal.libsignal.protocol.ecc.ECPublicKey(PublicBundle.decode(f.bundle).identityKey))
-                    val pinned = device.store.getIdentity(addr(sender))
-                    put(Contact(sender, f.mailboxId, keyChanged = pinned != null && pinned != relayIdentity))
-                    if (pinned != null && pinned != relayIdentity) changes += sender
+                    // New sender. The message is already decrypted (session state advanced), so it MUST be stored and
+                    // acknowledged no matter what: a retry would be rejected as a replay and the message would be lost.
+                    // Their mailbox is looked up best-effort now and lazily at send time if that fails.
+                    put(Contact(sender, ""))
+                    try { if (!resolveMailbox(sender)) changes += sender } catch (e: java.io.IOException) {} catch (e: RelayException) {}
                 }
                 val now = clock()
                 val ttl = contact(sender)?.ttlSeconds ?: 0
                 st.messages.add(StoredMessage(newId(), sender, false, String(plain, Charsets.UTF_8), now, if (ttl > 0) now + ttl * 1000 else 0))
                 received++; toAck += d.id
-            } catch (e: java.io.IOException) {
-                throw e // transient: leave unacked, retry later
-            } catch (e: RelayException) {
-                throw e
             } catch (e: Exception) {
                 dropped++; toAck += d.id // deterministic failure (tamper, replay, malformed): drop
             }
@@ -133,6 +129,20 @@ class GhostClient(
         save()
         if (toAck.isNotEmpty()) relay.ack(toAck)
         return PollResult(received, dropped, changes.toList())
+    }
+
+    /**
+     * Learn the mailbox of a contact whose session already exists, and check the identity the relay serves for
+     * them equals the one pinned from their messages. Returns false (and flags the contact) on mismatch.
+     */
+    private fun resolveMailbox(name: String): Boolean {
+        val f = relay.fetchBundle(name)
+        val relayIdentity = IdentityKey(org.signal.libsignal.protocol.ecc.ECPublicKey(PublicBundle.decode(f.bundle).identityKey))
+        val pinned = device.store.getIdentity(addr(name))
+        val c = contact(name) ?: return false
+        if (pinned != null && pinned != relayIdentity) { put(c.copy(keyChanged = true)); save(); return false }
+        put(c.copy(mailboxId = f.mailboxId)); save()
+        return true
     }
 
     /** Numeric safety number both users compare out of band (in person, or over another channel). */
