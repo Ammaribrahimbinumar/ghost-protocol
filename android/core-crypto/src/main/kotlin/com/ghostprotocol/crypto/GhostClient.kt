@@ -83,7 +83,6 @@ class GhostClient(
 
     @Synchronized fun send(name: String, text: String): StoredMessage {
         val c = contact(name) ?: throw UnknownContactException(name)
-        if (c.keyChanged) throw KeyChangedException(name)
         require(text.isNotEmpty() && text.length <= 4000) { "message length" }
         val envelope = messenger.encrypt(addr(name), text.toByteArray(Charsets.UTF_8))
         relay.send(c.mailboxId, Packet.encode(username, envelope))
