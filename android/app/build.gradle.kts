@@ -45,6 +45,7 @@ android {
             isShrinkResources = true
             isDebuggable = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (providers.gradleProperty("ghostTestBuildType").orNull == "release") proguardFile("proguard-test-keep.pro")
             signingConfig = signingConfigs.getByName("release")
         }
     }
