@@ -43,7 +43,8 @@ android {
             isShrinkResources = true
             isDebuggable = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.getByName("release")
+            // Signed only when a keystore is supplied (see docs/BUILD_AND_SIGNING.md); otherwise an unsigned APK is produced.
+            if (providers.gradleProperty("GHOST_KEYSTORE").isPresent) signingConfig = signingConfigs.getByName("release")
         }
     }
 
