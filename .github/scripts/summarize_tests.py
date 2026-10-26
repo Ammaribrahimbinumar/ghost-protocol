@@ -11,7 +11,7 @@ for f in glob.glob(f"{root}/**/build/test-results/**/*.xml", recursive=True) + g
             e = c.find(k)
             names.append(f"{c.get('classname').split('.')[-1]}.{c.get('name')}")
             if e is not None:
-                bad.append(f"{c.get('classname')}.{c.get('name')}: {(e.get('message') or '')[:300]}")
+                bad.append(f"{c.get('classname')}.{c.get('name')}: {(e.get('message') or '')[:300]} {(e.text or '')[:900].replace(chr(10), ' | ')}")
 print(f"::notice title=Test summary::tests={tot} failures={fail} errors={err} skipped={skip}")
 if bad:
     print("::error title=Failed tests::" + "%0A".join(bad)[:12000])
