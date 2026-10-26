@@ -12,6 +12,8 @@ kotlin {
 
 android {
     namespace = "com.ghostprotocol.app"
+    // CI can run the non-UI instrumented tests against the minified release build: -PghostTestBuildType=release
+    testBuildType = providers.gradleProperty("ghostTestBuildType").getOrElse("debug")
     compileSdk = 35
 
     defaultConfig {
