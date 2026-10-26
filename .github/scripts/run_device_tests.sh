@@ -20,5 +20,8 @@ timeout 600 gradle --no-daemon :app:connectedReleaseAndroidTest -PghostTestBuild
 code=$?
 echo "release gradle exit code: $code"
 [ $code -eq 124 ] && echo "::error title=Timeout::release device tests exceeded 10 minutes; log tail: $(tail -c 1500 "$LOG.release" | tr '\n' '|')"
-if [ $code -ne 0 ]; then python3 "$GITHUB_WORKSPACE/.github/scripts/explain_failure.py" "$LOG.release"; fi
+if [ $code -ne 0 ]; then
+  python3 "$GITHUB_WORKSPACE/.github/scripts/explain_failure.py" "$LOG.release"
+  echo "::error title=Device log (release pass)::$(adb logcat -d 2>/dev/null | grep -E 'FATAL|AndroidRuntime|UnsatisfiedLink|ClassNotFound|NoSuchMethod|NoClassDef|INSTRUMENTATION|ghostprotocol|libsignal|Process .* has died' | tail -40 | cut -c1-300 | tr '\n' '|')"
+fi
 exit $code
