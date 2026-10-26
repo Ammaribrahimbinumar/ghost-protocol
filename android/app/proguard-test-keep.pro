@@ -5,3 +5,7 @@
 -keep class androidx.tracing.** { *; }
 -keep class androidx.test.** { *; }
 -dontwarn androidx.test.**
+-keep class kotlin.** { *; }
+-keep class kotlinx.** { *; }
+-dontwarn kotlin.**
+-dontwarn kotlinx.**
