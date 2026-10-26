@@ -1,5 +1,4 @@
 #!/bin/sh
-SKIP_DEBUG=1  # TEMP-ITERATION
 adb reverse tcp:8443 tcp:8443
 cd android || exit 1
 LOG="${RUNNER_TEMP:-/tmp}/device.log"
