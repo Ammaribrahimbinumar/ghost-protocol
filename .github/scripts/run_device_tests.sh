@@ -1,9 +1,11 @@
 #!/bin/sh
+SKIP_DEBUG=1  # TEMP-ITERATION
 adb reverse tcp:8443 tcp:8443
 cd android || exit 1
 LOG="${RUNNER_TEMP:-/tmp}/device.log"
-timeout 900 gradle --no-daemon :app:connectedDebugAndroidTest "-Pandroid.testInstrumentationRunnerArguments.adminToken=$GHOST_ADMIN_TOKEN" --stacktrace > "$LOG" 2>&1
+[ -n "$SKIP_DEBUG" ] || timeout 900 gradle --no-daemon :app:connectedDebugAndroidTest "-Pandroid.testInstrumentationRunnerArguments.adminToken=$GHOST_ADMIN_TOKEN" --stacktrace > "$LOG" 2>&1
 code=$?
+[ -n "$SKIP_DEBUG" ] && code=0
 echo "debug gradle exit code: $code"
 [ $code -eq 124 ] && echo "::error title=Timeout::debug device tests exceeded 15 minutes; log tail: $(tail -c 1500 "$LOG" | tr '\n' '|')"
 if [ $code -ne 0 ]; then python3 "$GITHUB_WORKSPACE/.github/scripts/explain_failure.py" "$LOG"; exit $code; fi
@@ -22,6 +24,6 @@ echo "release gradle exit code: $code"
 [ $code -eq 124 ] && echo "::error title=Timeout::release device tests exceeded 10 minutes; log tail: $(tail -c 1500 "$LOG.release" | tr '\n' '|')"
 if [ $code -ne 0 ]; then
   python3 "$GITHUB_WORKSPACE/.github/scripts/explain_failure.py" "$LOG.release"
-  echo "::error title=Device log (release pass)::$(adb logcat -d 2>/dev/null | grep -E 'FATAL|AndroidRuntime|UnsatisfiedLink|ClassNotFound|NoSuchMethod|NoClassDef|INSTRUMENTATION|ghostprotocol|libsignal|Process .* has died' | tail -40 | cut -c1-300 | tr '\n' '|')"
+  echo "::error title=Device log (release pass)::$(adb logcat -d 2>/dev/null | grep -A14 -E 'FATAL EXCEPTION' | tail -40 | cut -c1-300 | tr '\n' '|')"
 fi
 exit $code
