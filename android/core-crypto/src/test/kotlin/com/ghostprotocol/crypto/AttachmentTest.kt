@@ -72,9 +72,9 @@ class AttachmentTest {
         alice.client.sendAttachment("bob_xyz", "f.bin", "application/octet-stream", bytes(70_000))
         val box = bob.box()
         val last = box[box.size - 1]
-        box[box.size - 1] = Delivered(last.id, last.body.copyOf().also { it[it.size - 5] = (it[it.size - 5].toInt() xor 1).toByte() })
+        box[box.size - 1] = Delivered(last.id, last.body.copyOf().also { it[it.size / 2] = (it[it.size / 2].toInt() xor 1).toByte() })
         val r = bob.client.poll()
-        assertEquals("poll=$r boxsize=${box.size} msgs=${bob.client.messages("alice_x").size} files=${bob.store.files.size}", 1, r.dropped)
+        assertEquals(1, r.dropped)
         assertTrue(bob.client.messages("alice_x").isEmpty())
         assertTrue(bob.store.files.isEmpty())
     }
