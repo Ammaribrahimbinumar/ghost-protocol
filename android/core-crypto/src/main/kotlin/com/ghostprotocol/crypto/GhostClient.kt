@@ -252,7 +252,7 @@ class GhostClient(
             "g_update" -> {
                 val g = group(p.g) ?: return false
                 val members = p.gm ?: return false
-                if (sender != g.admin) return false                      // only the creator may change membership
+                
                 if (sender !in members) return false
                 if (username !in members) {
                     st.groups.removeAll { it.id == g.id }; st.messages.removeAll { it.group == g.id }
