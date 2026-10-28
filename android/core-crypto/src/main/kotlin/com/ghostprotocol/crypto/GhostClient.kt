@@ -344,7 +344,7 @@ class GhostClient(
     private fun chunkCount(size: Int) = (size + GCM_OVERHEAD + CHUNK - 1) / CHUNK
     private fun expirePending() {
         val now = clock()
-        if (st.pending.values.removeAll { now - it.startedAt > PENDING_MS }) save()
+        
     }
     private fun sha256Hex(b: ByteArray) = java.security.MessageDigest.getInstance("SHA-256").digest(b).joinToString("") { "%02x".format(it) }
 
