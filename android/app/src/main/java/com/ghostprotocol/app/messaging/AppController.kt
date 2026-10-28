@@ -42,15 +42,19 @@ class AppController(
     context: Context,
     private val relayFactory: (url: String, signer: RequestSigner, mailbox: String?) -> RelayClient =
         { url, signer, mailbox -> RelayClient(url, signer, mailbox) },
-    deviceAlias: String = DeviceVault.DEFAULT_ALIAS,
+    private val deviceAlias: String = DeviceVault.DEFAULT_ALIAS,
     private val prefix: String = "",
+    private val signerAlias: String = KeystoreRelaySigner.ALIAS,
 ) {
     private val ctx = context.applicationContext
     private val vault = DeviceVault(ctx, deviceAlias, prefix + "device.state")
     private val configStore = KeystoreSecretStore(File(ctx.filesDir, prefix + "config.rec"), "ghost_config_v1$prefix")
     private val clientAlias = "ghost_client_v1$prefix"
     private val clientStore = KeystoreSecretStore(File(ctx.filesDir, prefix + "client.rec"), clientAlias)
+    private val attachments = FileAttachmentStore(File(ctx.filesDir, prefix + "attachments"))
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    /** Bumped by [wipeAll]; any write from work started before the wipe is discarded. */
+    @Volatile private var generation = 0
 
     private val _phase = MutableStateFlow<Phase>(Phase.Loading)
     val phase: StateFlow<Phase> = _phase.asStateFlow()
@@ -77,10 +81,11 @@ class AppController(
         val cfg = configStore.read()
         if (cfg == null) return if (vault.exists()) Phase.Broken("Identity exists but its settings are missing.") else Phase.NeedsRegistration
         val j = JSONObject(String(cfg, Charsets.UTF_8))
-        if (!KeystoreRelaySigner.exists()) return Phase.Broken("The relay signing key is missing.")
+        if (!KeystoreRelaySigner.exists(signerAlias)) return Phase.Broken("The relay signing key is missing.")
         val device = vault.load(j.getString("username"))
-        val relay = relayFactory(j.getString("url"), KeystoreRelaySigner.getOrCreate(), j.getString("mailbox"))
-        client = GhostClient(device, relay, clientStore.read(), { clientStore.write(it) })
+        val relay = relayFactory(j.getString("url"), KeystoreRelaySigner.getOrCreate(signerAlias), j.getString("mailbox"))
+        val gen = generation
+        client = GhostClient(device, relay, clientStore.read(), { if (gen == generation) clientStore.write(it) }, attachments = attachments)
         refresh()
         return Phase.Ready
     }
@@ -94,7 +99,7 @@ class AppController(
                 require(invite.isNotBlank()) { "Enter your invitation code" }
                 val device = vault.create(username)
                 try {
-                    val signer = KeystoreRelaySigner.getOrCreate()
+                    val signer = KeystoreRelaySigner.getOrCreate(signerAlias)
                     val relay = relayFactory(url.trim(), signer, null)
                     val mailbox = relay.register(
                         invite.trim(), username, signer.publicKey,
@@ -102,7 +107,7 @@ class AppController(
                     )
                     configStore.write(JSONObject().put("url", url.trim()).put("username", username).put("mailbox", mailbox).toString().toByteArray())
                 } catch (e: Exception) {
-                    vault.destroy(); KeystoreRelaySigner.delete(); throw e
+                    vault.destroy(); vault.reset(); KeystoreRelaySigner.delete(signerAlias); throw e
                 }
                 _phase.value = load()
             } catch (e: Exception) {
@@ -128,7 +133,29 @@ class AppController(
     fun acceptKeyChange(name: String) = act { acceptKeyChange(name) }
     fun setDisappearing(name: String, seconds: Long) = act { setDisappearing(name, seconds) }
     fun deleteChat(name: String) = act { deleteChat(name) }
+    fun sendAttachment(name: String, fileName: String, mime: String, data: ByteArray) = act { sendAttachment(name, fileName, mime, data) }
+    fun attachmentBytes(ref: com.ghostprotocol.crypto.AttachmentRef): ByteArray? = try { client?.attachmentBytes(ref) } catch (e: Exception) { null }
     fun safetyNumber(name: String): String? = try { client?.safetyNumber(name) } catch (e: Exception) { null }
+
+    /**
+     * Erase everything of this profile, offline and immediately: Keystore keys first (which makes every encrypted file
+     * unreadable even if a later step is interrupted), then the files. The relay account is NOT deleted (no network
+     * here); it simply becomes unreachable from this phone. Afterwards the profile is a blank install.
+     */
+    fun wipeAll() {
+        generation++
+        scope.coroutineContext[kotlinx.coroutines.Job]?.children?.forEach { it.cancel() }
+        client = null; openChat = null
+        runCatching {
+            val ks = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            listOf(deviceAlias, "ghost_config_v1$prefix", clientAlias, signerAlias).forEach { if (ks.containsAlias(it)) ks.deleteEntry(it) }
+        }
+        vault.destroy(); vault.reset()
+        listOf("config.rec", "client.rec").forEach { File(ctx.filesDir, prefix + it).delete() }
+        attachments.deleteAll()
+        _contacts.value = emptyList(); _messages.value = emptyList(); _notice.value = null; _busy.value = false
+        _phase.value = Phase.NeedsRegistration
+    }
 
     fun open(name: String?) { openChat = name; refresh() }
     fun dismissNotice() { _notice.value = null }

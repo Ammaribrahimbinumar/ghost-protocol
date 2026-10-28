@@ -18,20 +18,20 @@ import java.security.spec.ECGenParameterSpec
  * This key only authenticates requests to the relay. It is separate from the Signal identity key.
  */
 object KeystoreRelaySigner {
-    private const val ALIAS = "ghost_relay_auth_p256"
+    const val ALIAS = "ghost_relay_auth_p256"
 
-    fun exists(): Boolean = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.containsAlias(ALIAS)
+    fun exists(alias: String = ALIAS): Boolean = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.containsAlias(alias)
 
-    fun getOrCreate(): EcdsaP256Signer {
+    fun getOrCreate(alias: String = ALIAS): EcdsaP256Signer {
         val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        if (!ks.containsAlias(ALIAS)) generate()
-        val priv = ks.getKey(ALIAS, null) as PrivateKey
-        val pub = ks.getCertificate(ALIAS).publicKey
+        if (!ks.containsAlias(alias)) generate(alias)
+        val priv = ks.getKey(alias, null) as PrivateKey
+        val pub = ks.getCertificate(alias).publicKey
         return EcdsaP256Signer(priv, pub)
     }
 
-    private fun generate() {
-        fun spec(strongBox: Boolean) = KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_SIGN)
+    private fun generate(alias: String) {
+        fun spec(strongBox: Boolean) = KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_SIGN)
             .setAlgorithmParameterSpec(ECGenParameterSpec("secp256r1"))
             .setDigests(KeyProperties.DIGEST_SHA256)
             .apply { if (strongBox && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) setIsStrongBoxBacked(true) }
@@ -45,7 +45,7 @@ object KeystoreRelaySigner {
         }
     }
 
-    fun delete() {
-        KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.deleteEntry(ALIAS)
+    fun delete(alias: String = ALIAS) {
+        KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.apply { if (containsAlias(alias)) deleteEntry(alias) }
     }
 }

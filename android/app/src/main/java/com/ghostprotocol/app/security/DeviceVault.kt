@@ -18,20 +18,26 @@ class DeviceVault(context: Context, private val alias: String = DEFAULT_ALIAS, f
 
     fun exists(): Boolean = store.read() != null
 
+    /** Allow writes again after a wipe, so a fresh identity can be created. */
+    fun reset() { destroyed = false }
+
     /** Creates a brand-new identity. Refuses if one already exists, so it can never overwrite a real one. */
     fun create(username: String): LocalDevice {
         check(store.read() == null) { "a device identity already exists" }
-        return LocalDevice.create(username, onChange = { store.write(it) })
+        return LocalDevice.create(username, onChange = { if (!destroyed) store.write(it) })
     }
 
     /** Loads the existing identity. Throws [StoreCorruptedException]/[StoreFormatException] if it cannot be trusted. */
     fun load(username: String): LocalDevice {
         val snap = store.read() ?: throw StoreCorruptedException("no device state")
-        return LocalDevice.restore(username, snap, onChange = { store.write(it) })
+        return LocalDevice.restore(username, snap, onChange = { if (!destroyed) store.write(it) })
     }
 
     /** Deletes the identity file and its Keystore key. Only for rolling back a failed registration. */
+    @Volatile private var destroyed = false
+
     fun destroy() {
+        destroyed = true                         // late writes from in-flight work must not recreate state
         file.delete()
         runCatching { KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.deleteEntry(alias) }
     }
