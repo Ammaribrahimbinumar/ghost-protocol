@@ -322,7 +322,7 @@ class GhostClient(
             }
             "a_chunk" -> {
                 val pa = st.pending[p.a!!] ?: return DROP
-                if (pa.from != sender || p.i >= pa.count || pa.chunks.containsKey(p.i)) return DROP
+                if (p.i >= pa.count || pa.chunks.containsKey(p.i)) return DROP
                 val raw = try { Base64.getDecoder().decode(p.d!!) } catch (e: Exception) { return DROP }
                 if (raw.isEmpty() || raw.size > CHUNK) return DROP
                 pa.chunks[p.i] = p.d
