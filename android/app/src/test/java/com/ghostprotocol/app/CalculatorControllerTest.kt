@@ -66,4 +66,13 @@ class CalculatorControllerTest {
         calc.press("a"); calc.press("$"); calc.press("7")
         assertEquals("7", calc.display.value)
     }
+
+    @Test fun decoyAndDuressOutcomesAreReportedAndWipeInput() = runTest {
+        verifier.configureDecoy("1357".toCharArray()); verifier.configureDuress("9753".toCharArray())
+        type("1357"); assertEquals(com.ghostprotocol.app.calc.UnlockOutcome.DECOY, calc.submitOutcome()); assertTrue(calc.isInputWiped())
+        type("9753"); assertEquals(com.ghostprotocol.app.calc.UnlockOutcome.DURESS, calc.submitOutcome()); assertTrue(calc.isInputWiped())
+        type("2468"); assertEquals(com.ghostprotocol.app.calc.UnlockOutcome.REAL, calc.submitOutcome())
+        type("12+1"); assertEquals(com.ghostprotocol.app.calc.UnlockOutcome.NONE, calc.submitOutcome()); assertEquals("13", calc.display.value)
+        type("1357"); assertFalse("submit() stays true only for the main code", calc.submit())
+    }
 }

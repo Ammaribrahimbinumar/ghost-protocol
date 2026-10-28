@@ -20,6 +20,9 @@ import kotlinx.coroutines.withContext
  * - Input lives in a [SecureInputBuffer] that is zeroed on unlock, on lock and on clear.
  * - Nothing here logs input.
  */
+/** What a press of "=" did. Everything except NONE leaves the calculator and starts the corresponding profile. */
+enum class UnlockOutcome { NONE, REAL, DECOY, DURESS }
+
 class CalculatorController(private val verifier: UnlockVerifier) {
     private val input = SecureInputBuffer(MAX_INPUT)
     private val _display = MutableStateFlow("")
@@ -39,8 +42,10 @@ class CalculatorController(private val verifier: UnlockVerifier) {
         publish()
     }
 
-    /** @return true if the secret matched and the messenger should open. */
-    suspend fun submit(): Boolean {
+    /** @return true if the MAIN secret matched and the messenger should open. */
+    suspend fun submit(): Boolean = submitOutcome() == UnlockOutcome.REAL
+
+    suspend fun submitOutcome(): UnlockOutcome {
         if (input.length in UnlockVerifier.MIN_LEN..UnlockVerifier.MAX_LEN && input.isAllDigits()) {
             val candidate = input.snapshot()
             val result = try {
@@ -50,9 +55,15 @@ class CalculatorController(private val verifier: UnlockVerifier) {
             } finally {
                 candidate.fill('\u0000')
             }
-            if (result == VerifyResult.ACCEPTED) {
+            val outcome = when (result) {
+                VerifyResult.ACCEPTED -> UnlockOutcome.REAL
+                VerifyResult.DECOY -> UnlockOutcome.DECOY
+                VerifyResult.DURESS -> UnlockOutcome.DURESS
+                else -> UnlockOutcome.NONE
+            }
+            if (outcome != UnlockOutcome.NONE) {
                 lock()
-                return true
+                return outcome
             }
         }
         val shown = try {
@@ -65,7 +76,7 @@ class CalculatorController(private val verifier: UnlockVerifier) {
             input.appendAll(shown)
         }
         _display.value = shown
-        return false
+        return UnlockOutcome.NONE
     }
 
     /** Wipes input and display. Called on unlock, on leaving the app, and on process stop. */

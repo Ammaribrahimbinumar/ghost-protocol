@@ -23,7 +23,7 @@ fun interface Clock {
 /** The stored record cannot be read or fails sanity checks. Never silently treated as "unconfigured". */
 class StoreCorruptedException(message: String) : Exception(message)
 
-enum class VerifyResult { ACCEPTED, REJECTED, THROTTLED, NOT_CONFIGURED }
+enum class VerifyResult { ACCEPTED, REJECTED, THROTTLED, NOT_CONFIGURED, DECOY, DURESS }
 
 /**
  * Verifies the user-configured numeric unlock secret.
@@ -52,7 +52,7 @@ class UnlockVerifier(
         const val FREE_ATTEMPTS = 5
         const val BASE_LOCK_MS = 30_000L
         const val MAX_LOCK_MS = 3_600_000L
-        private const val FORMAT_VERSION = 1
+        private const val FORMAT_VERSION = 2
         private const val SALT_BYTES = 16
         private const val HASH_BITS = 256
     }
@@ -63,7 +63,12 @@ class UnlockVerifier(
         val hash: ByteArray,
         val failures: Int,
         val lockedUntil: Long,
-    )
+        val decoySalt: ByteArray? = null, val decoyHash: ByteArray? = null,     // optional second code: opens a separate empty profile
+        val duressSalt: ByteArray? = null, val duressHash: ByteArray? = null,   // optional third code: wipes real data, then opens the decoy
+    ) {
+        fun with(failures: Int = this.failures, lockedUntil: Long = this.lockedUntil) =
+            Record(iterations, salt, hash, failures, lockedUntil, decoySalt, decoyHash, duressSalt, duressHash)
+    }
 
     fun isValidShape(candidate: CharArray): Boolean =
         candidate.size in MIN_LEN..MAX_LEN && candidate.all { it in '0'..'9' }
@@ -93,26 +98,71 @@ class UnlockVerifier(
         if (lockedUntil - now > MAX_LOCK_MS) {
             // Clock was moved backwards; clamp so a rollback cannot extend a lockout indefinitely.
             lockedUntil = now + MAX_LOCK_MS
-            save(Record(rec.iterations, rec.salt, rec.hash, rec.failures, lockedUntil))
+            save(rec.with(lockedUntil = lockedUntil))
         }
         if (now < lockedUntil) return VerifyResult.THROTTLED
         if (!isValidShape(candidate)) return VerifyResult.REJECTED
 
-        val actual = derive(candidate, rec.salt, rec.iterations)
-        return if (MessageDigest.isEqual(actual, rec.hash)) {
-            actual.fill(0)
-            if (rec.failures != 0 || rec.lockedUntil != 0L) {
-                save(Record(rec.iterations, rec.salt, rec.hash, 0, 0L))
-            }
-            VerifyResult.ACCEPTED
+        // All three codes are always derived and compared (a missing one uses a dummy salt), so timing does not reveal
+        // whether a decoy or duress code is configured, or which code was typed.
+        val a = derive(candidate, rec.salt, rec.iterations)
+        val d = derive(candidate, rec.decoySalt ?: rec.salt, rec.iterations)
+        val u = derive(candidate, rec.duressSalt ?: rec.salt, rec.iterations)
+        val isPrimary = MessageDigest.isEqual(a, rec.hash)
+        val isDecoy = MessageDigest.isEqual(d, rec.decoyHash ?: ByteArray(HASH_BITS / 8)) and (rec.decoyHash != null)
+        val isDuress = MessageDigest.isEqual(u, rec.duressHash ?: ByteArray(HASH_BITS / 8)) and (rec.duressHash != null)
+        a.fill(0); d.fill(0); u.fill(0)
+        val result = when {
+            isPrimary -> VerifyResult.ACCEPTED
+            isDuress -> VerifyResult.DURESS
+            isDecoy -> VerifyResult.DECOY
+            else -> null
+        }
+        return if (result != null) {
+            if (rec.failures != 0 || rec.lockedUntil != 0L) save(rec.with(failures = 0, lockedUntil = 0L))
+            result
         } else {
-            actual.fill(0)
             val failures = rec.failures + 1
             val lock = if (failures >= FREE_ATTEMPTS) now + lockoutMillis(failures) else 0L
-            save(Record(rec.iterations, rec.salt, rec.hash, failures, lock))
+            save(rec.with(failures = failures, lockedUntil = lock))
             VerifyResult.REJECTED
         }
     }
+
+    /** True if a decoy / duress code is set. (Only meaningful while unlocked in the real profile.) */
+    @Synchronized fun hasDecoy(): Boolean = load()?.decoyHash != null
+    @Synchronized fun hasDuress(): Boolean = load()?.duressHash != null
+
+    /** Distinct-code rule: the new code must differ from the primary and from the other secondary code. */
+    private fun requireDistinct(rec: Record, code: CharArray, other: Pair<ByteArray?, ByteArray?>) {
+        val p = derive(code, rec.salt, rec.iterations)
+        val sameAsPrimary = MessageDigest.isEqual(p, rec.hash); p.fill(0)
+        require(!sameAsPrimary) { "must differ from the main code" }
+        if (other.first != null && other.second != null) {
+            val o = derive(code, other.first!!, rec.iterations)
+            val sameAsOther = MessageDigest.isEqual(o, other.second); o.fill(0)
+            require(!sameAsOther) { "decoy and duress codes must differ" }
+        }
+    }
+
+    @Synchronized fun configureDecoy(code: CharArray) {
+        require(isValidShape(code)) { "code must be $MIN_LEN-$MAX_LEN digits" }
+        val rec = load() ?: throw IllegalStateException("main code not set")
+        requireDistinct(rec, code, rec.duressSalt to rec.duressHash)
+        val salt = ByteArray(SALT_BYTES).also { random.nextBytes(it) }
+        save(Record(rec.iterations, rec.salt, rec.hash, rec.failures, rec.lockedUntil, salt, derive(code, salt, rec.iterations), rec.duressSalt, rec.duressHash))
+    }
+
+    @Synchronized fun configureDuress(code: CharArray) {
+        require(isValidShape(code)) { "code must be $MIN_LEN-$MAX_LEN digits" }
+        val rec = load() ?: throw IllegalStateException("main code not set")
+        requireDistinct(rec, code, rec.decoySalt to rec.decoyHash)
+        val salt = ByteArray(SALT_BYTES).also { random.nextBytes(it) }
+        save(Record(rec.iterations, rec.salt, rec.hash, rec.failures, rec.lockedUntil, rec.decoySalt, rec.decoyHash, salt, derive(code, salt, rec.iterations)))
+    }
+
+    @Synchronized fun clearDecoy() { load()?.let { save(Record(it.iterations, it.salt, it.hash, it.failures, it.lockedUntil, null, null, it.duressSalt, it.duressHash)) } }
+    @Synchronized fun clearDuress() { load()?.let { save(Record(it.iterations, it.salt, it.hash, it.failures, it.lockedUntil, it.decoySalt, it.decoyHash, null, null)) } }
 
     private fun lockoutMillis(failures: Int): Long {
         val doublings = (failures - FREE_ATTEMPTS).coerceIn(0, 20)
@@ -137,6 +187,10 @@ class UnlockVerifier(
             it.writeByte(r.hash.size); it.write(r.hash)
             it.writeInt(r.failures)
             it.writeLong(r.lockedUntil)
+            val flags = (if (r.decoyHash != null) 1 else 0) or (if (r.duressHash != null) 2 else 0)
+            it.writeByte(flags)
+            if (r.decoyHash != null) { it.write(r.decoySalt!!); it.write(r.decoyHash) }
+            if (r.duressHash != null) { it.write(r.duressSalt!!); it.write(r.duressHash) }
         }
         store.write(out.toByteArray())
     }
@@ -145,7 +199,8 @@ class UnlockVerifier(
         val raw = store.read() ?: return null
         try {
             DataInputStream(ByteArrayInputStream(raw)).use {
-                if (it.readUnsignedByte() != FORMAT_VERSION) throw StoreCorruptedException("unknown record version")
+                val version = it.readUnsignedByte()
+                if (version != 1 && version != FORMAT_VERSION) throw StoreCorruptedException("unknown record version")
                 val iter = it.readInt()
                 val salt = ByteArray(it.readUnsignedByte()).also { b -> it.readFully(b) }
                 val hash = ByteArray(it.readUnsignedByte()).also { b -> it.readFully(b) }
@@ -154,7 +209,13 @@ class UnlockVerifier(
                 if (iter !in 1..10_000_000 || salt.size != SALT_BYTES || hash.size != HASH_BITS / 8 || failures < 0) {
                     throw StoreCorruptedException("record failed sanity checks")
                 }
-                return Record(iter, salt, hash, failures, lockedUntil)
+                var dS: ByteArray? = null; var dH: ByteArray? = null; var uS: ByteArray? = null; var uH: ByteArray? = null
+                if (version >= 2) {
+                    val flags = it.readUnsignedByte()
+                    if (flags and 1 != 0) { dS = ByteArray(SALT_BYTES).also { b -> it.readFully(b) }; dH = ByteArray(HASH_BITS / 8).also { b -> it.readFully(b) } }
+                    if (flags and 2 != 0) { uS = ByteArray(SALT_BYTES).also { b -> it.readFully(b) }; uH = ByteArray(HASH_BITS / 8).also { b -> it.readFully(b) } }
+                }
+                return Record(iter, salt, hash, failures, lockedUntil, dS, dH, uS, uH)
             }
         } catch (e: IOException) {
             throw StoreCorruptedException("record truncated")

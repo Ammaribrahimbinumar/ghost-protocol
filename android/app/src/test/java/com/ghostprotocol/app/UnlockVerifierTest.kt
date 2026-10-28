@@ -156,4 +156,63 @@ class UnlockVerifierTest {
         assertNotEquals(0, c.size)
         assertTrue(c.all { it in '0'..'9' })
     }
+
+    // ---- decoy / duress codes ----
+    private fun twoCodes(): UnlockVerifier = configured().also { it.configureDecoy("1357".toCharArray()); it.configureDuress("9753".toCharArray()) }
+
+    @Test fun decoyAndDuressCodesAreRecognisedSeparately() {
+        val v = twoCodes()
+        assertEquals(VerifyResult.ACCEPTED, v.verify(good()))
+        assertEquals(VerifyResult.DECOY, v.verify("1357".toCharArray()))
+        assertEquals(VerifyResult.DURESS, v.verify("9753".toCharArray()))
+        assertEquals(VerifyResult.REJECTED, v.verify("1111".toCharArray()))
+        assertTrue(v.hasDecoy()); assertTrue(v.hasDuress())
+    }
+
+    @Test fun secondaryCodesSurviveRestartAndStoredRecordHasNoPlaintext() {
+        twoCodes()
+        val again = verifier()
+        assertEquals(VerifyResult.DURESS, again.verify("9753".toCharArray()))
+        val raw = String(store.data!!, Charsets.ISO_8859_1)
+        assertFalse(raw.contains("1357")); assertFalse(raw.contains("9753"))
+    }
+
+    @Test fun codesMustBeDistinct() {
+        val v = configured()
+        assertThrows(IllegalArgumentException::class.java) { v.configureDecoy(good()) }
+        assertThrows(IllegalArgumentException::class.java) { v.configureDuress(good()) }
+        v.configureDecoy("1357".toCharArray())
+        assertThrows(IllegalArgumentException::class.java) { v.configureDuress("1357".toCharArray()) }
+        assertThrows(IllegalArgumentException::class.java) { v.configureDecoy("12".toCharArray()) }
+        assertThrows(IllegalStateException::class.java) { verifier().configureDecoy("1357".toCharArray()) }
+    }
+
+    @Test fun withoutSecondaryCodesTheirDigitsJustFail() {
+        val v = configured()
+        assertFalse(v.hasDecoy()); assertFalse(v.hasDuress())
+        assertEquals(VerifyResult.REJECTED, v.verify("1357".toCharArray()))
+    }
+
+    @Test fun clearingRemovesTheCode() {
+        val v = twoCodes()
+        v.clearDuress(); assertFalse(v.hasDuress())
+        assertEquals(VerifyResult.REJECTED, v.verify("9753".toCharArray()))
+        assertEquals(VerifyResult.DECOY, v.verify("1357".toCharArray()))
+        v.clearDecoy(); assertEquals(VerifyResult.ACCEPTED, v.verify(good()))
+    }
+
+    @Test fun wrongGuessesStillThrottleAndSecondaryCodesAreThrottledToo() {
+        val v = twoCodes()
+        repeat(5) { assertEquals(VerifyResult.REJECTED, v.verify(bad())) }
+        assertEquals(VerifyResult.THROTTLED, v.verify("9753".toCharArray()))      // a locked-out duress code does nothing
+        assertEquals(VerifyResult.THROTTLED, v.verify("1357".toCharArray()))
+        clock.now += 31_000
+        assertEquals(VerifyResult.DURESS, v.verify("9753".toCharArray()))
+    }
+
+    @Test fun reconfiguringTheMainCodeKeepsSecondariesAndReadsOldRecords() {
+        val v = twoCodes()
+        v.configure("7777".toCharArray())          // replaces the whole record: secondaries are cleared on purpose
+        assertFalse(v.hasDecoy()); assertFalse(v.hasDuress())
+    }
 }
