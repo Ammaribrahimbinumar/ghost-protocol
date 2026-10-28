@@ -33,6 +33,11 @@ class MainActivity : ComponentActivity() {
     private var findings by mutableStateOf<List<RiskFinding>>(emptyList())
     private lateinit var controller: CalculatorController
     private lateinit var app: AppController
+    private var decoyApp: AppController? = null
+    private var decoyMode by mutableStateOf(false)
+    private fun decoy(): AppController = decoyApp ?: AppController(
+        applicationContext, deviceAlias = "ghost_device_state_key_decoy", prefix = "decoy_", signerAlias = "ghost_relay_auth_decoy",
+    ).also { it.start(); decoyApp = it }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -57,14 +62,24 @@ class MainActivity : ComponentActivity() {
                 when {
                     corrupted -> StoreCorruptedScreen()
                     !isConfigured -> SetupScreen(verifier) { isConfigured = true }
-                    !unlocked -> CalculatorScreen(controller) {
+                    !unlocked -> CalculatorScreen(controller) { outcome ->
                         // Re-scan the environment immediately before revealing anything sensitive.
                         findings = RiskCheck.scan(this@MainActivity)
+                        when (outcome) {
+                            com.ghostprotocol.app.calc.UnlockOutcome.REAL -> decoyMode = false
+                            com.ghostprotocol.app.calc.UnlockOutcome.DECOY -> { decoy(); decoyMode = true }
+                            // Duress: erase the real profile immediately and silently, then show the decoy.
+                            com.ghostprotocol.app.calc.UnlockOutcome.DURESS -> { app.wipeAll(); decoy(); decoyMode = true }
+                            com.ghostprotocol.app.calc.UnlockOutcome.NONE -> Unit
+                        }
                         unlocked = true
                     }
                     // Default is warn-only: TalkBack and other legitimate accessibility tools can read the screen,
                     // and blocking them by default would lock out users who rely on them.
-                    else -> MessagingApp(app, findings, onLock = ::lockNow)
+                    else -> MessagingApp(
+                        if (decoyMode) decoy() else app, findings, onLock = ::lockNow,
+                        settings = if (decoyMode) null else verifier,
+                    )
                 }
             }
         }
@@ -80,5 +95,6 @@ class MainActivity : ComponentActivity() {
         unlocked = false
         controller.lock()
         app.lock()
+        decoyApp?.lock()
     }
 }

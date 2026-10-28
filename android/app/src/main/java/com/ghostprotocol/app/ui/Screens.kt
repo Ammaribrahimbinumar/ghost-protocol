@@ -54,7 +54,7 @@ fun GhostTheme(content: @Composable () -> Unit) {
 
 /** The disguise. Looks and works like a calculator; "=" on the configured secret opens the app. */
 @Composable
-fun CalculatorScreen(controller: CalculatorController, onUnlocked: () -> Unit) {
+fun CalculatorScreen(controller: CalculatorController, onUnlocked: (com.ghostprotocol.app.calc.UnlockOutcome) -> Unit) {
     val display by controller.display.collectAsState()
     val scope = rememberCoroutineScope()
     val rows = listOf(
@@ -82,7 +82,7 @@ fun CalculatorScreen(controller: CalculatorController, onUnlocked: () -> Unit) {
             }
             KeyRow {
                 KeyCap("=", Modifier.weight(1f), container = Accent) {
-                    scope.launch { if (controller.submit()) onUnlocked() }
+                    scope.launch { val o = controller.submitOutcome(); if (o != com.ghostprotocol.app.calc.UnlockOutcome.NONE) onUnlocked(o) }
                 }
             }
         }

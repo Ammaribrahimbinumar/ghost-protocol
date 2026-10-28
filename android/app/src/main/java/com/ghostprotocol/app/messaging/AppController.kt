@@ -5,6 +5,8 @@ import com.ghostprotocol.app.security.DeviceVault
 import com.ghostprotocol.app.security.KeystoreRelaySigner
 import com.ghostprotocol.app.security.KeystoreSecretStore
 import com.ghostprotocol.crypto.Contact
+import com.ghostprotocol.crypto.Group
+import com.ghostprotocol.crypto.SendReport
 import com.ghostprotocol.crypto.GhostClient
 import com.ghostprotocol.crypto.KeyChangedException
 import com.ghostprotocol.crypto.RelayClient
@@ -62,6 +64,8 @@ class AppController(
     val contacts: StateFlow<List<Contact>> = _contacts.asStateFlow()
     private val _messages = MutableStateFlow<List<StoredMessage>>(emptyList())
     val messages: StateFlow<List<StoredMessage>> = _messages.asStateFlow()
+    private val _groups = MutableStateFlow<List<Group>>(emptyList())
+    val groups: StateFlow<List<Group>> = _groups.asStateFlow()
     private val _notice = MutableStateFlow<String?>(null)
     val notice: StateFlow<String?> = _notice.asStateFlow()
     private val _busy = MutableStateFlow(false)
@@ -71,6 +75,7 @@ class AppController(
 
     @Volatile private var client: GhostClient? = null
     @Volatile private var openChat: String? = null
+    @Volatile private var openGroup: String? = null
     val username: String? get() = client?.username
 
     fun start() {
@@ -145,7 +150,7 @@ class AppController(
     fun wipeAll() {
         generation++
         scope.coroutineContext[kotlinx.coroutines.Job]?.children?.forEach { it.cancel() }
-        client = null; openChat = null
+        client = null; openChat = null; openGroup = null
         runCatching {
             val ks = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
             listOf(deviceAlias, "ghost_config_v1$prefix", clientAlias, signerAlias).forEach { if (ks.containsAlias(it)) ks.deleteEntry(it) }
@@ -153,15 +158,40 @@ class AppController(
         vault.destroy(); vault.reset()
         listOf("config.rec", "client.rec").forEach { File(ctx.filesDir, prefix + it).delete() }
         attachments.deleteAll()
-        _contacts.value = emptyList(); _messages.value = emptyList(); _notice.value = null; _busy.value = false
+        _contacts.value = emptyList(); _groups.value = emptyList(); _messages.value = emptyList(); _notice.value = null; _busy.value = false
         _phase.value = Phase.NeedsRegistration
     }
 
-    fun open(name: String?) { openChat = name; refresh() }
+    fun open(name: String?) { openChat = name; openGroup = null; refresh() }
+    fun openGroupChat(id: String?) { openGroup = id; openChat = null; refresh() }
+
+    fun createGroup(name: String, members: List<String>) = actR { createGroup(name, members).second }
+    fun sendGroup(id: String, text: String) = actR { sendGroup(id, text) }
+    fun addToGroup(id: String, member: String) = actR { updateGroup(id, add = listOf(member.trim().lowercase())) }
+    fun removeFromGroup(id: String, member: String) = actR { updateGroup(id, remove = listOf(member)) }
+    fun leaveGroup(id: String) = actR { leaveGroup(id) }
+    fun setGroupDisappearing(id: String, seconds: Long) = act { setGroupDisappearing(id, seconds) }
+    fun broadcast(names: List<String>, text: String) = actR { broadcast(names, text) }
+
+    /** Reads the chosen file (max 1 MiB + 1 byte, so oversize is detected without loading it all) and sends it. */
+    fun sendAttachmentUri(name: String, uri: android.net.Uri) {
+        scope.launch {
+            _busy.value = true
+            try {
+                val cr = ctx.contentResolver
+                val mime = (cr.getType(uri) ?: "application/octet-stream").lowercase().takeIf { it.matches(Regex("^[a-z0-9][a-z0-9.+-]*/[a-z0-9][a-z0-9.+-]*$")) } ?: "application/octet-stream"
+                val label = cr.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { if (it.moveToFirst()) it.getString(0) else null } ?: "file"
+                val data = cr.openInputStream(uri)?.use { it.readNBytes((1 shl 20) + 1) } ?: throw IllegalArgumentException("Cannot read that file.")
+                require(data.size <= (1 shl 20)) { "Files up to 1 MiB are supported." }
+                client?.sendAttachment(name, label, mime, data)
+            } catch (e: Exception) { _notice.value = describe(e) } finally { _busy.value = false }
+            refresh()
+        }
+    }
     fun dismissNotice() { _notice.value = null }
 
     /** Called on lock: nothing readable stays in UI state. (Keys remain in process memory; see SECURITY_LIMITATIONS.) */
-    fun lock() { openChat = null; _messages.value = emptyList(); _notice.value = null }
+    fun lock() { openChat = null; openGroup = null; _messages.value = emptyList(); _notice.value = null }
 
     private fun act(block: GhostClient.() -> Unit) {
         scope.launch {
@@ -171,10 +201,22 @@ class AppController(
         }
     }
 
+    private fun actR(block: GhostClient.() -> SendReport?) {
+        scope.launch {
+            _busy.value = true
+            try {
+                val r = client?.block()
+                if (r != null && r.failed.isNotEmpty()) _notice.value = "Not delivered to: " + r.failed.entries.joinToString { "${it.key} (${it.value})" }
+            } catch (e: Exception) { _notice.value = describe(e) } finally { _busy.value = false }
+            refresh()
+        }
+    }
+
     private fun refresh() {
         val c = client ?: return
         _contacts.value = c.contacts().sortedBy { it.name }
-        _messages.value = openChat?.let { c.messages(it) } ?: emptyList()
+        _groups.value = c.groups().sortedBy { it.name }
+        _messages.value = openGroup?.let { c.groupMessages(it) } ?: openChat?.let { c.messages(it) } ?: emptyList()
     }
 
     private fun describe(e: Exception): String = when (e) {
