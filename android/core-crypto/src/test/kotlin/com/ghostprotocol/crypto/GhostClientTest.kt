@@ -11,6 +11,7 @@ class FakeRelay : RelayApi {
     val acked = mutableListOf<String>()
     var failInbox = false
     var failFetch = false
+    var send429 = 0
     private var n = 0
     var current: String = ""      // mailbox of whoever is calling
 
@@ -28,7 +29,7 @@ class FakeRelay : RelayApi {
         val a = accounts[username] ?: throw RelayException(404, "no such user")
         return FetchedBundle(a.mailbox, a.device.publicBundle().encode(), a.device.oneTimePreKeyList().firstOrNull()?.encode())
     }
-    override fun send(recipientMailbox: String, payload: ByteArray) { boxes[recipientMailbox]!!.add(Delivered("m${++n}", payload)) }
+    override fun send(recipientMailbox: String, payload: ByteArray) { if (send429 > 0) { send429--; throw RelayException(429, "slow down") }; boxes[recipientMailbox]!!.add(Delivered("m${++n}", payload)) }
     override fun inbox() = emptyList<Delivered>()
     override fun ack(ids: List<String>) {}
 }

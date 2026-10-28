@@ -3,6 +3,7 @@ package com.ghostprotocol.crypto
 import com.google.gson.Gson
 import com.google.gson.JsonParseException
 import java.security.SecureRandom
+import java.util.Base64
 import org.signal.libsignal.protocol.IdentityKey
 import org.signal.libsignal.protocol.UntrustedIdentityException
 
@@ -23,6 +24,32 @@ data class StoredMessage(
     val id: String, val contact: String, val outgoing: Boolean, val text: String,
     val timestamp: Long, val expiresAt: Long = 0,
     val group: String? = null, val system: Boolean = false,
+    val attachment: AttachmentRef? = null,
+)
+
+/** Points at an encrypted file in the [AttachmentStore]. The key lives here (inside the encrypted client state). */
+data class AttachmentRef(val id: String, val name: String, val mime: String, val size: Int, val key: String)
+
+/** Where encrypted attachment bytes live. The app backs this with files under app-private storage. */
+interface AttachmentStore {
+    fun put(id: String, data: ByteArray)
+    fun get(id: String): ByteArray?
+    fun delete(id: String)
+}
+class MemoryAttachmentStore : AttachmentStore {
+    private val m = HashMap<String, ByteArray>()
+    @Synchronized override fun put(id: String, data: ByteArray) { m[id] = data }
+    @Synchronized override fun get(id: String) = m[id]
+    @Synchronized override fun delete(id: String) { m.remove(id) }
+}
+
+class AttachmentException(msg: String) : Exception(msg)
+
+/** A file being received: chunks accumulate here (persisted) until the whole encrypted file is present. */
+data class PendingAttachment(
+    val id: String, val from: String, val name: String, val mime: String, val size: Int, val count: Int,
+    val key: String, val hash: String, val ttl: Long, val startedAt: Long,
+    val chunks: MutableMap<Int, String> = mutableMapOf(),
 )
 
 /** Group membership is controlled by the creator ([admin]); members are usernames and include yourself. */
@@ -37,6 +64,7 @@ private class ClientState(
     var contacts: MutableList<Contact> = mutableListOf(),
     var messages: MutableList<StoredMessage> = mutableListOf(),
     var groups: MutableList<Group> = mutableListOf(),
+    var pending: MutableMap<String, PendingAttachment> = mutableMapOf(),
 )
 
 /**
@@ -50,6 +78,9 @@ internal data class Payload(
     val g: String? = null,
     val gn: String? = null,
     val gm: List<String>? = null,
+    // attachments: a_meta (a, fn, mime, sz, n, k, h) and a_chunk (a, i, d)
+    val a: String? = null, val fn: String? = null, val mime: String? = null, val sz: Int = 0, val n: Int = 0,
+    val k: String? = null, val h: String? = null, val i: Int = -1, val d: String? = null,
 )
 
 /**
@@ -69,6 +100,8 @@ class GhostClient(
     state: ByteArray? = null,
     private val persist: (ByteArray) -> Unit = {},
     private val clock: () -> Long = System::currentTimeMillis,
+    private val attachments: AttachmentStore = MemoryAttachmentStore(),
+    private val sleeper: (Long) -> Unit = { Thread.sleep(it) },
 ) {
     private val gson = Gson()
     private val messenger = Messenger(device)
@@ -121,6 +154,18 @@ class GhostClient(
         if (p.gn != null && (p.gn.isEmpty() || p.gn.length > MAX_GROUP_NAME)) return null
         if (p.g != null && !p.g.matches(Regex("^[0-9a-f]{32}$"))) return null
         if (p.gm != null && (p.gm.size !in 2..MAX_MEMBERS || p.gm.toSet().size != p.gm.size || !p.gm.all(::nameOk))) return null
+        if (p.t == "a_meta") {
+            val name = p.fn; val mime = p.mime
+            if (p.a == null || !p.a.matches(HEX32) || name == null || name.isEmpty() || name.length > MAX_FILENAME) return null
+            if (mime == null || mime.length > 60 || !mime.matches(MIME)) return null
+            if (p.sz !in 1..MAX_ATTACHMENT || p.n != chunkCount(p.sz) || p.k == null || p.h == null) return null
+            if (!p.h.matches(Regex("^[0-9a-f]{64}$"))) return null
+            val key = try { Base64.getDecoder().decode(p.k) } catch (e: Exception) { return null }
+            if (key.size != 32) return null
+        }
+        if (p.t == "a_chunk") {
+            if (p.a == null || !p.a.matches(HEX32) || p.i !in 0 until MAX_CHUNKS || p.d == null || p.d.length > CHUNK * 2) return null
+        }
         return p
     }
 
@@ -220,7 +265,7 @@ class GhostClient(
     @Synchronized fun leaveGroup(id: String): SendReport {
         val g = group(id) ?: throw IllegalArgumentException("unknown group")
         val report = fanOut(g.members - username, Payload("g_leave", g = id))
-        st.groups.removeAll { it.id == id }; st.messages.removeAll { it.group == id }; save()
+        st.groups.removeAll { it.id == id }; dropMessages { it.group == id }; save()
         return report
     }
 
@@ -231,31 +276,32 @@ class GhostClient(
     }
 
     /** Apply one decrypted payload from [sender]. Returns false if it must be dropped (invalid or not allowed). */
-    private fun handleIncoming(sender: String, plain: ByteArray, now: Long): Boolean {
-        val p = decodePayload(plain) ?: return false
+    private fun handleIncoming(sender: String, plain: ByteArray, now: Long): Int {
+        val p = decodePayload(plain) ?: return DROP
+        var kind = MSG
         when (p.t) {
             "text" -> {
-                val text = p.m ?: return false
+                val text = p.m ?: return DROP
                 st.messages.add(StoredMessage(newId(), sender, false, text, now, exp(p.ttl, now)))
             }
             "g_text" -> {
-                val g = group(p.g) ?: return false
-                val text = p.m ?: return false
-                if (sender !in g.members) return false
+                val g = group(p.g) ?: return DROP
+                val text = p.m ?: return DROP
+                if (sender !in g.members) return DROP
                 st.messages.add(StoredMessage(newId(), sender, false, text, now, exp(p.ttl, now), g.id))
             }
             "g_create" -> {
-                val id = p.g ?: return false; val members = p.gm ?: return false; val name = p.gn ?: return false
-                if (group(id) != null || sender !in members || username !in members) return false
+                val id = p.g ?: return DROP; val members = p.gm ?: return DROP; val name = p.gn ?: return DROP
+                if (group(id) != null || sender !in members || username !in members) return DROP
                 st.groups.add(Group(id, name, sender, members)); system(id, "$sender added you to the group", now)
             }
             "g_update" -> {
-                val g = group(p.g) ?: return false
-                val members = p.gm ?: return false
-                if (sender != g.admin) return false                      // only the creator may change membership
-                if (sender !in members) return false
+                val g = group(p.g) ?: return DROP
+                val members = p.gm ?: return DROP
+                if (sender != g.admin) return DROP                      // only the creator may change membership
+                if (sender !in members) return DROP
                 if (username !in members) {
-                    st.groups.removeAll { it.id == g.id }; st.messages.removeAll { it.group == g.id }
+                    st.groups.removeAll { it.id == g.id }; dropMessages { it.group == g.id }
                     st.messages.add(StoredMessage(newId(), "", false, "You were removed from \"${g.name}\"", now, 0, null, system = true))
                 } else {
                     (members - g.members.toSet()).forEach { system(g.id, "$it was added", now) }
@@ -264,14 +310,102 @@ class GhostClient(
                 }
             }
             "g_leave" -> {
-                val g = group(p.g) ?: return false
-                if (sender !in g.members || sender == username) return false
+                val g = group(p.g) ?: return DROP
+                if (sender !in g.members || sender == username) return DROP
                 st.groups.removeAll { it.id == g.id }; st.groups.add(g.copy(members = g.members - sender))
                 system(g.id, "$sender left", now)
             }
-            else -> return false
+            "a_meta" -> {
+                if (st.pending.size >= MAX_PENDING || st.pending.containsKey(p.a!!)) return DROP
+                st.pending[p.a] = PendingAttachment(p.a, sender, cleanName(p.fn!!), p.mime!!, p.sz, p.n, p.k!!, p.h!!, p.ttl, now)
+                kind = INTERNAL
+            }
+            "a_chunk" -> {
+                val pa = st.pending[p.a!!] ?: return DROP
+                if (pa.from != sender || p.i >= pa.count || pa.chunks.containsKey(p.i)) return DROP
+                val raw = try { Base64.getDecoder().decode(p.d!!) } catch (e: Exception) { return DROP }
+                if (raw.isEmpty() || raw.size > CHUNK) return DROP
+                pa.chunks[p.i] = p.d
+                if (pa.chunks.size == pa.count) {
+                    st.pending.remove(pa.id)
+                    if (!finishAttachment(pa, now)) return DROP
+                } else kind = INTERNAL
+            }
+            else -> return DROP
         }
-        return true
+        return kind
+    }
+
+    // ---------------------------------------------------------------- attachments (one-to-one only)
+    private fun cleanName(raw: String): String {
+        val base = raw.substringAfterLast('/').substringAfterLast('\\').filter { !it.isISOControl() }.trim().take(MAX_FILENAME)
+        return base.ifEmpty { "file" }
+    }
+    private fun chunkCount(size: Int) = (size + GCM_OVERHEAD + CHUNK - 1) / CHUNK
+    private fun expirePending() {
+        val now = clock()
+        if (st.pending.values.removeAll { now - it.startedAt > PENDING_MS }) save()
+    }
+    private fun sha256Hex(b: ByteArray) = java.security.MessageDigest.getInstance("SHA-256").digest(b).joinToString("") { "%02x".format(it) }
+
+    private fun gcm(mode: Int, key: ByteArray, iv: ByteArray, data: ByteArray, off: Int = 0): ByteArray =
+        javax.crypto.Cipher.getInstance("AES/GCM/NoPadding").apply {
+            init(mode, javax.crypto.spec.SecretKeySpec(key, "AES"), javax.crypto.spec.GCMParameterSpec(128, iv))
+        }.doFinal(data, off, data.size - off)
+
+    /** All chunks are in: verify the transport hash, then the AEAD tag and size, and only then keep the (still encrypted) file. */
+    private fun finishAttachment(pa: PendingAttachment, now: Long): Boolean = try {
+        val ct = java.io.ByteArrayOutputStream().also { o -> for (i in 0 until pa.count) o.write(Base64.getDecoder().decode(pa.chunks[i] ?: return false)) }.toByteArray()
+        if (sha256Hex(ct) != pa.hash) false
+        else {
+            val key = Base64.getDecoder().decode(pa.key)
+            val plain = gcm(javax.crypto.Cipher.DECRYPT_MODE, key, ct.copyOfRange(0, 12), ct, 12)
+            if (plain.size != pa.size) false
+            else {
+                attachments.put(pa.id, ct)
+                st.messages.add(StoredMessage(newId(), pa.from, false, pa.name, now, exp(pa.ttl, now), null, false, AttachmentRef(pa.id, pa.name, pa.mime, pa.size, pa.key)))
+                true
+            }
+        }
+    } catch (e: Exception) { false }
+
+    /** Encrypt a file with a fresh random key and send it as numbered chunks, each inside the normal end-to-end channel. */
+    @Synchronized fun sendAttachment(name: String, fileName: String, mime: String, data: ByteArray): StoredMessage {
+        val c = contact(name) ?: throw UnknownContactException(name)
+        require(data.isNotEmpty() && data.size <= MAX_ATTACHMENT) { "attachment size" }
+        require(mime.length <= 60 && mime.matches(MIME)) { "mime type" }
+        val fname = cleanName(fileName)
+        val key = ByteArray(32).also { random.nextBytes(it) }
+        val iv = ByteArray(12).also { random.nextBytes(it) }
+        val ct = iv + gcm(javax.crypto.Cipher.ENCRYPT_MODE, key, iv, data)
+        val chunks = ct.toList().chunked(CHUNK).map { it.toByteArray() }
+        val id = ByteArray(16).also { random.nextBytes(it) }.joinToString("") { "%02x".format(it) }
+        val k64 = Base64.getEncoder().encodeToString(key)
+        retrying { deliver(name, Payload("a_meta", a = id, fn = fname, mime = mime, sz = data.size, n = chunks.size, k = k64, h = sha256Hex(ct), ttl = c.ttlSeconds)) }
+        chunks.forEachIndexed { i, ch -> retrying { deliver(name, Payload("a_chunk", a = id, i = i, d = Base64.getEncoder().encodeToString(ch))) } }
+        attachments.put(id, ct)
+        val now = clock()
+        val m = StoredMessage(newId(), name, true, fname, now, exp(c.ttlSeconds, now), null, false, AttachmentRef(id, fname, mime, data.size, k64))
+        st.messages.add(m); save()
+        return m
+    }
+
+    /** Relay rate limits (429) are expected during a burst of chunks: pause and retry a few times. */
+    private fun retrying(block: () -> Unit) {
+        var tries = 0
+        while (true) {
+            try { block(); return } catch (e: RelayException) {
+                if (e.status != 429 || ++tries > 10) throw e
+                sleeper(700)
+            }
+        }
+    }
+
+    /** Decrypt a stored attachment for display. Throws [AttachmentException] if missing or if it fails authentication. */
+    @Synchronized fun attachmentBytes(ref: AttachmentRef): ByteArray {
+        val ct = attachments.get(ref.id) ?: throw AttachmentException("file missing")
+        return try { gcm(javax.crypto.Cipher.DECRYPT_MODE, Base64.getDecoder().decode(ref.key), ct.copyOfRange(0, 12), ct, 12) }
+        catch (e: Exception) { throw AttachmentException("file failed authentication") }
     }
 
     /** Fetch, decrypt and store new messages. */
@@ -279,6 +413,7 @@ class GhostClient(
         val toAck = mutableListOf<String>()
         var received = 0; var dropped = 0
         val changes = linkedSetOf<String>()
+        expirePending()
         for (d in relay.inbox()) {
             try {
                 val (sender, envelope) = Packet.decode(d.body)
@@ -297,7 +432,7 @@ class GhostClient(
                     put(Contact(sender, ""))
                     try { if (!resolveMailbox(sender)) changes += sender } catch (e: java.io.IOException) {} catch (e: RelayException) {}
                 }
-                if (handleIncoming(sender, plain, clock())) received++ else dropped++
+                when (handleIncoming(sender, plain, clock())) { MSG -> received++; INTERNAL -> {}; else -> dropped++ }
                 toAck += d.id
             } catch (e: Exception) {
                 dropped++; toAck += d.id // deterministic failure (tamper, replay, malformed): drop
@@ -353,12 +488,18 @@ class GhostClient(
     @Synchronized fun purgeExpired(): Int {
         val now = clock()
         val n = st.messages.size
-        st.messages.removeAll { it.expiresAt in 1..now }
+        dropMessages { it.expiresAt in 1..now }
         if (st.messages.size != n) save()
         return n - st.messages.size
     }
 
-    @Synchronized fun deleteChat(name: String) { st.messages.removeAll { it.group == null && it.contact == name }; save() }
+    /** Remove messages AND their encrypted attachment files (the key goes with the message record). */
+    private fun dropMessages(pred: (StoredMessage) -> Boolean) {
+        st.messages.filter(pred).forEach { m -> m.attachment?.let { runCatching { attachments.delete(it.id) } } }
+        st.messages.removeAll(pred)
+    }
+
+    @Synchronized fun deleteChat(name: String) { dropMessages { it.group == null && it.contact == name }; save() }
 
     companion object {
         private const val PAYLOAD_V2: Byte = 2
@@ -366,6 +507,18 @@ class GhostClient(
         private const val MAX_GROUP_NAME = 40
         private const val MAX_MEMBERS = 32
         private const val MAX_TTL = 30L * 24 * 3600
+        private const val MAX_ATTACHMENT = 1 shl 20          // 1 MiB: bounded by relay limits (64 KiB envelopes, 60-request bursts)
+        private const val CHUNK = 32 * 1024
+        private const val GCM_OVERHEAD = 12 + 16
+        private const val MAX_CHUNKS = (MAX_ATTACHMENT + GCM_OVERHEAD + CHUNK - 1) / CHUNK
+        private const val MAX_FILENAME = 80
+        private const val MAX_PENDING = 4
+        private const val PENDING_MS = 60L * 60 * 1000
+        private const val DROP = 0
+        private const val MSG = 1
+        private const val INTERNAL = 2
+        private val HEX32 = Regex("^[0-9a-f]{32}$")
+        private val MIME = Regex("^[a-z0-9][a-z0-9.+-]*/[a-z0-9][a-z0-9.+-]*$")
     }
 
     private fun newId() = ByteArray(12).also { random.nextBytes(it) }.joinToString("") { "%02x".format(it) }
