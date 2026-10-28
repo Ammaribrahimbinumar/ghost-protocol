@@ -18,16 +18,38 @@ data class Contact(
     val ttlSeconds: Long = 0,            // local disappearing-message timer for this chat; 0 = keep
 )
 
+/** For group messages [contact] is the author and [group] the group id; for 1:1 chats [group] is null. */
 data class StoredMessage(
     val id: String, val contact: String, val outgoing: Boolean, val text: String,
     val timestamp: Long, val expiresAt: Long = 0,
+    val group: String? = null, val system: Boolean = false,
 )
 
+/** Group membership is controlled by the creator ([admin]); members are usernames and include yourself. */
+data class Group(val id: String, val name: String, val admin: String, val members: List<String>, val ttlSeconds: Long = 0)
+
 data class PollResult(val received: Int, val dropped: Int, val keyChanges: List<String>)
+
+/** Outcome of sending to several people: who got it, and who did not (with a short reason). */
+data class SendReport(val sent: List<String>, val failed: Map<String, String>)
 
 private class ClientState(
     var contacts: MutableList<Contact> = mutableListOf(),
     var messages: MutableList<StoredMessage> = mutableListOf(),
+    var groups: MutableList<Group> = mutableListOf(),
+)
+
+/**
+ * Plaintext carried INSIDE the end-to-end encrypted envelope (never visible to the relay).
+ * t: text | g_create | g_update | g_leave | g_text. ttl = disappearing timer the sender chose, honoured by the receiver.
+ */
+internal data class Payload(
+    val t: String = "text",
+    val m: String? = null,
+    val ttl: Long = 0,
+    val g: String? = null,
+    val gn: String? = null,
+    val gm: List<String>? = null,
 )
 
 /**
@@ -57,7 +79,11 @@ class GhostClient(
 
     @Synchronized fun contacts(): List<Contact> = st.contacts.toList()
     @Synchronized fun messages(contact: String): List<StoredMessage> =
-        st.messages.filter { it.contact == contact }.sortedBy { it.timestamp }
+        st.messages.filter { it.group == null && it.contact == contact }.sortedBy { it.timestamp }
+
+    @Synchronized fun groups(): List<Group> = st.groups.toList()
+    @Synchronized fun groupMessages(id: String): List<StoredMessage> =
+        st.messages.filter { it.group == id }.sortedBy { it.timestamp }
 
     private fun contact(name: String) = st.contacts.firstOrNull { it.name == name }
     private fun addr(name: String) = org.signal.libsignal.protocol.SignalProtocolAddress(name, 1)
@@ -81,18 +107,171 @@ class GhostClient(
         return c
     }
 
-    @Synchronized fun send(name: String, text: String): StoredMessage {
+    private fun nameOk(n: String) = n.matches(Regex("^[a-z0-9_]{3,32}$"))
+    private fun exp(ttl: Long, now: Long) = if (ttl in 1..MAX_TTL) now + ttl * 1000 else 0L
+
+    private fun encodePayload(p: Payload): ByteArray = byteArrayOf(PAYLOAD_V2) + gson.toJson(p).toByteArray(Charsets.UTF_8)
+
+    /** Parses and validates a payload. Returns null for anything malformed or out of bounds (caller drops it). */
+    private fun decodePayload(b: ByteArray): Payload? {
+        if (b.isEmpty() || b[0] != PAYLOAD_V2) return null
+        val p = try { gson.fromJson(String(b, 1, b.size - 1, Charsets.UTF_8), Payload::class.java) } catch (e: Exception) { return null } ?: return null
+        if (p.ttl !in 0..MAX_TTL) return null
+        if (p.m != null && (p.m.isEmpty() || p.m.length > MAX_TEXT)) return null
+        if (p.gn != null && (p.gn.isEmpty() || p.gn.length > MAX_GROUP_NAME)) return null
+        if (p.g != null && !p.g.matches(Regex("^[0-9a-f]{32}$"))) return null
+        if (p.gm != null && (p.gm.size !in 2..MAX_MEMBERS || p.gm.toSet().size != p.gm.size || !p.gm.all(::nameOk))) return null
+        return p
+    }
+
+    /** Encrypt [payload] for one contact and hand it to the relay. Does not store anything locally. */
+    private fun deliver(name: String, payload: Payload) {
         val c0 = contact(name) ?: throw UnknownContactException(name)
         if (c0.keyChanged) throw KeyChangedException(name)
         if (c0.mailboxId.isEmpty() && !resolveMailbox(name)) throw KeyChangedException(name)
         val c = contact(name)!!
-        require(text.isNotEmpty() && text.length <= 4000) { "message length" }
-        val envelope = messenger.encrypt(addr(name), text.toByteArray(Charsets.UTF_8))
+        val envelope = messenger.encrypt(addr(name), encodePayload(payload))
         relay.send(c.mailboxId, Packet.encode(username, envelope))
+    }
+
+    @Synchronized fun send(name: String, text: String): StoredMessage {
+        val c = contact(name) ?: throw UnknownContactException(name)
+        require(text.isNotEmpty() && text.length <= MAX_TEXT) { "message length" }
+        deliver(name, Payload("text", text, ttl = c.ttlSeconds))
         val now = clock()
-        val m = StoredMessage(newId(), name, true, text, now, if (c.ttlSeconds > 0) now + c.ttlSeconds * 1000 else 0)
+        val m = StoredMessage(newId(), name, true, text, now, exp(c.ttlSeconds, now))
         st.messages.add(m); save()
         return m
+    }
+
+    private fun reason(e: Exception) = when (e) {
+        is KeyChangedException -> "key changed"
+        is UnknownContactException -> "not a contact"
+        is java.io.IOException -> "network"
+        is RelayException -> "relay ${e.status}"
+        else -> "failed"
+    }
+
+    private fun ensureContact(name: String) { if (contact(name) == null) addContact(name) }
+
+    private fun fanOut(targets: List<String>, payload: Payload): SendReport {
+        val sent = mutableListOf<String>(); val failed = linkedMapOf<String, String>()
+        for (t in targets) {
+            try { ensureContact(t); deliver(t, payload); sent += t } catch (e: Exception) { failed[t] = reason(e) }
+        }
+        save()
+        return SendReport(sent, failed)
+    }
+
+    // ---------------------------------------------------------------- broadcast
+    /** Send the same text to several contacts as ordinary one-to-one messages (recipients cannot see each other). */
+    @Synchronized fun broadcast(names: List<String>, text: String): SendReport {
+        require(names.isNotEmpty() && names.size <= MAX_MEMBERS * 2 && names.toSet().size == names.size) { "recipients" }
+        require(text.isNotEmpty() && text.length <= MAX_TEXT) { "message length" }
+        val sent = mutableListOf<String>(); val failed = linkedMapOf<String, String>()
+        for (n in names) { try { send(n, text); sent += n } catch (e: Exception) { failed[n] = reason(e) } }
+        return SendReport(sent, failed)
+    }
+
+    // ---------------------------------------------------------------- groups
+    private fun group(id: String?) = st.groups.firstOrNull { it.id == id }
+    private fun system(group: String, text: String, now: Long = clock()) =
+        st.messages.add(StoredMessage(newId(), "", false, text, now, 0, group, system = true))
+
+    /**
+     * Groups use pairwise fan-out: every message is encrypted separately for each member with their one-to-one Signal
+     * session (NOT Sender Keys). Cost grows with group size; the benefit is that removing someone simply stops sending
+     * them anything. Only the creator can change membership; members ignore membership changes from anyone else.
+     */
+    @Synchronized fun createGroup(name: String, others: List<String>): Pair<Group, SendReport> {
+        require(name.isNotBlank() && name.length <= MAX_GROUP_NAME) { "group name" }
+        require(others.isNotEmpty() && others.size < MAX_MEMBERS && others.toSet().size == others.size && others.all(::nameOk) && username !in others) { "members" }
+        val id = ByteArray(16).also { random.nextBytes(it) }.joinToString("") { "%02x".format(it) }
+        val g = Group(id, name.trim(), username, listOf(username) + others)
+        st.groups.add(g); system(id, "You created the group")
+        return g to fanOut(others, Payload("g_create", g = id, gn = g.name, gm = g.members))
+    }
+
+    @Synchronized fun sendGroup(id: String, text: String): SendReport {
+        val g = group(id) ?: throw IllegalArgumentException("unknown group")
+        require(text.isNotEmpty() && text.length <= MAX_TEXT) { "message length" }
+        val now = clock()
+        st.messages.add(StoredMessage(newId(), username, true, text, now, exp(g.ttlSeconds, now), id))
+        return fanOut(g.members - username, Payload("g_text", text, ttl = g.ttlSeconds, g = id))
+    }
+
+    /** Creator only. Removed members are told they were removed and receive nothing further. */
+    @Synchronized fun updateGroup(id: String, add: List<String> = emptyList(), remove: List<String> = emptyList()): SendReport {
+        val g = group(id) ?: throw IllegalArgumentException("unknown group")
+        check(g.admin == username) { "only the group creator can change members" }
+        require(add.all(::nameOk) && username !in remove) { "members" }
+        val newMembers = ((g.members + add).distinct() - remove.toSet())
+        require(newMembers.size in 2..MAX_MEMBERS) { "group size" }
+        val ng = g.copy(members = newMembers)
+        st.groups.removeAll { it.id == id }; st.groups.add(ng)
+        remove.filter { it in g.members }.forEach { system(id, "$it was removed") }
+        add.filter { it !in g.members }.forEach { system(id, "$it was added") }
+        val joining = newMembers - g.members.toSet()                       // new members have no group yet: send a create
+        val a = fanOut(joining, Payload("g_create", g = id, gn = g.name, gm = newMembers))
+        val b = fanOut(((g.members + newMembers).distinct() - username) - joining.toSet(), Payload("g_update", g = id, gn = g.name, gm = newMembers))
+        return SendReport(a.sent + b.sent, a.failed + b.failed)
+    }
+
+    @Synchronized fun leaveGroup(id: String): SendReport {
+        val g = group(id) ?: throw IllegalArgumentException("unknown group")
+        val report = fanOut(g.members - username, Payload("g_leave", g = id))
+        st.groups.removeAll { it.id == id }; st.messages.removeAll { it.group == id }; save()
+        return report
+    }
+
+    @Synchronized fun setGroupDisappearing(id: String, seconds: Long) {
+        require(seconds in 0..MAX_TTL)
+        val g = group(id) ?: throw IllegalArgumentException("unknown group")
+        st.groups.removeAll { it.id == id }; st.groups.add(g.copy(ttlSeconds = seconds)); save()
+    }
+
+    /** Apply one decrypted payload from [sender]. Returns false if it must be dropped (invalid or not allowed). */
+    private fun handleIncoming(sender: String, plain: ByteArray, now: Long): Boolean {
+        val p = decodePayload(plain) ?: return false
+        when (p.t) {
+            "text" -> {
+                val text = p.m ?: return false
+                st.messages.add(StoredMessage(newId(), sender, false, text, now, exp(p.ttl, now)))
+            }
+            "g_text" -> {
+                val g = group(p.g) ?: return false
+                val text = p.m ?: return false
+                if (sender !in g.members) return false
+                st.messages.add(StoredMessage(newId(), sender, false, text, now, exp(p.ttl, now), g.id))
+            }
+            "g_create" -> {
+                val id = p.g ?: return false; val members = p.gm ?: return false; val name = p.gn ?: return false
+                if (group(id) != null || sender !in members || username !in members) return false
+                st.groups.add(Group(id, name, sender, members)); system(id, "$sender added you to the group", now)
+            }
+            "g_update" -> {
+                val g = group(p.g) ?: return false
+                val members = p.gm ?: return false
+                if (sender != g.admin) return false                      // only the creator may change membership
+                if (sender !in members) return false
+                if (username !in members) {
+                    st.groups.removeAll { it.id == g.id }; st.messages.removeAll { it.group == g.id }
+                    st.messages.add(StoredMessage(newId(), "", false, "You were removed from \"${g.name}\"", now, 0, null, system = true))
+                } else {
+                    (members - g.members.toSet()).forEach { system(g.id, "$it was added", now) }
+                    (g.members - members.toSet()).forEach { system(g.id, "$it was removed", now) }
+                    st.groups.removeAll { it.id == g.id }; st.groups.add(g.copy(name = p.gn ?: g.name, members = members))
+                }
+            }
+            "g_leave" -> {
+                val g = group(p.g) ?: return false
+                if (sender !in g.members || sender == username) return false
+                st.groups.removeAll { it.id == g.id }; st.groups.add(g.copy(members = g.members - sender))
+                system(g.id, "$sender left", now)
+            }
+            else -> return false
+        }
+        return true
     }
 
     /** Fetch, decrypt and store new messages. */
@@ -118,10 +297,8 @@ class GhostClient(
                     put(Contact(sender, ""))
                     try { if (!resolveMailbox(sender)) changes += sender } catch (e: java.io.IOException) {} catch (e: RelayException) {}
                 }
-                val now = clock()
-                val ttl = contact(sender)?.ttlSeconds ?: 0
-                st.messages.add(StoredMessage(newId(), sender, false, String(plain, Charsets.UTF_8), now, if (ttl > 0) now + ttl * 1000 else 0))
-                received++; toAck += d.id
+                if (handleIncoming(sender, plain, clock())) received++ else dropped++
+                toAck += d.id
             } catch (e: Exception) {
                 dropped++; toAck += d.id // deterministic failure (tamper, replay, malformed): drop
             }
@@ -168,7 +345,7 @@ class GhostClient(
     }
 
     @Synchronized fun setDisappearing(name: String, seconds: Long) {
-        require(seconds in 0..30L * 24 * 3600)
+        require(seconds in 0..MAX_TTL)
         val c = contact(name) ?: throw UnknownContactException(name); put(c.copy(ttlSeconds = seconds)); save()
     }
 
@@ -181,7 +358,15 @@ class GhostClient(
         return n - st.messages.size
     }
 
-    @Synchronized fun deleteChat(name: String) { st.messages.removeAll { it.contact == name }; save() }
+    @Synchronized fun deleteChat(name: String) { st.messages.removeAll { it.group == null && it.contact == name }; save() }
+
+    companion object {
+        private const val PAYLOAD_V2: Byte = 2
+        private const val MAX_TEXT = 4000
+        private const val MAX_GROUP_NAME = 40
+        private const val MAX_MEMBERS = 32
+        private const val MAX_TTL = 30L * 24 * 3600
+    }
 
     private fun newId() = ByteArray(12).also { random.nextBytes(it) }.joinToString("") { "%02x".format(it) }
 
