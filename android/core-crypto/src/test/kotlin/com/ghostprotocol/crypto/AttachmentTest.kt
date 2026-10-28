@@ -74,7 +74,7 @@ class AttachmentTest {
         val last = box[box.size - 1]
         box[box.size - 1] = Delivered(last.id, last.body.copyOf().also { it[it.size - 5] = (it[it.size - 5].toInt() xor 1).toByte() })
         val r = bob.client.poll()
-        assertEquals(1, r.dropped)
+        assertEquals("poll=$r boxsize=${box.size} msgs=${bob.client.messages("alice_x").size} files=${bob.store.files.size}", 1, r.dropped)
         assertTrue(bob.client.messages("alice_x").isEmpty())
         assertTrue(bob.store.files.isEmpty())
     }
@@ -103,7 +103,6 @@ class AttachmentTest {
         forge(alice, "bob_xyz", """{"t":"a_chunk","a":"$id","i":0,"d":"${b64(bytes(40000))}"}""")                     // oversized chunk
         forge(alice, "bob_xyz", """{"t":"a_chunk","a":"$id","i":0,"d":"!!notbase64!!"}""")
         val r = bob.client.poll()
-        assertEquals(1, r.received - 1 + 0)   // meta counts as internal, not a message
         assertEquals(0, r.received); assertEquals(5, r.dropped)
         forge(alice, "bob_xyz", """{"t":"a_chunk","a":"$id","i":0,"d":"${b64(bytes(100))}"}""")
         forge(alice, "bob_xyz", """{"t":"a_chunk","a":"$id","i":0,"d":"${b64(bytes(100))}"}""")                       // duplicate
