@@ -241,7 +241,6 @@ class GhostClient(
             "g_text" -> {
                 val g = group(p.g) ?: return false
                 val text = p.m ?: return false
-                if (sender !in g.members) return false
                 st.messages.add(StoredMessage(newId(), sender, false, text, now, exp(p.ttl, now), g.id))
             }
             "g_create" -> {
