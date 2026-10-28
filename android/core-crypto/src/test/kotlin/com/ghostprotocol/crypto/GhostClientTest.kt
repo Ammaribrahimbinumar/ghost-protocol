@@ -12,6 +12,7 @@ class FakeRelay : RelayApi {
     var failInbox = false
     var failFetch = false
     var send429 = 0
+    private val served = mutableMapOf<String, Int>()
     private var n = 0
     var current: String = ""      // mailbox of whoever is calling
 
@@ -27,7 +28,9 @@ class FakeRelay : RelayApi {
     override fun fetchBundle(username: String): FetchedBundle {
         if (failFetch) throw java.io.IOException("offline")
         val a = accounts[username] ?: throw RelayException(404, "no such user")
-        return FetchedBundle(a.mailbox, a.device.publicBundle().encode(), a.device.oneTimePreKeyList().firstOrNull()?.encode())
+        // Like the real relay: each one-time prekey is handed out once, then the bundle is served without one.
+        val used = served.getOrDefault(username, 0); served[username] = used + 1
+        return FetchedBundle(a.mailbox, a.device.publicBundle().encode(), a.device.oneTimePreKeyList().getOrNull(used)?.encode())
     }
     override fun send(recipientMailbox: String, payload: ByteArray) { if (send429 > 0) { send429--; throw RelayException(429, "slow down") }; boxes[recipientMailbox]!!.add(Delivered("m${++n}", payload)) }
     override fun inbox() = emptyList<Delivered>()
