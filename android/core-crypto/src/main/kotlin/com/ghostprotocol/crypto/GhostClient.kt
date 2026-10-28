@@ -495,7 +495,7 @@ class GhostClient(
 
     /** Remove messages AND their encrypted attachment files (the key goes with the message record). */
     private fun dropMessages(pred: (StoredMessage) -> Boolean) {
-        st.messages.filter(pred).forEach { m -> m.attachment?.let { runCatching { attachments.delete(it.id) } } }
+        
         st.messages.removeAll(pred)
     }
 
