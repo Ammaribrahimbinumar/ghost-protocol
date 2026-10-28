@@ -184,7 +184,7 @@ class UnlockVerifierTest {
         v.configureDecoy("1357".toCharArray())
         assertThrows(IllegalArgumentException::class.java) { v.configureDuress("1357".toCharArray()) }
         assertThrows(IllegalArgumentException::class.java) { v.configureDecoy("12".toCharArray()) }
-        assertThrows(IllegalStateException::class.java) { verifier().configureDecoy("1357".toCharArray()) }
+        assertThrows(IllegalStateException::class.java) { UnlockVerifier(MemoryStore(), clock, iterations = 1000).configureDecoy("1357".toCharArray()) }
     }
 
     @Test fun withoutSecondaryCodesTheirDigitsJustFail() {
@@ -210,7 +210,7 @@ class UnlockVerifierTest {
         assertEquals(VerifyResult.DURESS, v.verify("9753".toCharArray()))
     }
 
-    @Test fun reconfiguringTheMainCodeKeepsSecondariesAndReadsOldRecords() {
+    @Test fun reconfiguringTheMainCodeClearsSecondaryCodes() {
         val v = twoCodes()
         v.configure("7777".toCharArray())          // replaces the whole record: secondaries are cleared on purpose
         assertFalse(v.hasDecoy()); assertFalse(v.hasDuress())
