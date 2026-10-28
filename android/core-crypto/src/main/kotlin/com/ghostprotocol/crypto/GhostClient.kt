@@ -246,7 +246,7 @@ class GhostClient(
             }
             "g_create" -> {
                 val id = p.g ?: return false; val members = p.gm ?: return false; val name = p.gn ?: return false
-                if (group(id) != null || sender !in members || username !in members) return false
+                if (sender !in members || username !in members) return false
                 st.groups.add(Group(id, name, sender, members)); system(id, "$sender added you to the group", now)
             }
             "g_update" -> {
