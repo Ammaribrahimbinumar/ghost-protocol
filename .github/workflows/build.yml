@@ -72,6 +72,11 @@ jobs:
         run: python3 .github/scripts/summarize_tests.py android
       - name: Debug APK
         run: cd android && gradle --no-daemon assembleDebug -PghostAbis=arm64-v8a
+      - name: APK size breakdown
+        if: always()
+        run: |
+          ls -l android/app/build/outputs/apk/debug/*.apk
+          unzip -lv android/app/build/outputs/apk/debug/*.apk | sort -k1 -n -r | head -12 | while read l; do echo "::notice title=apk-entry::$l"; done
       - uses: actions/upload-artifact@v4
         if: always()
         with:
