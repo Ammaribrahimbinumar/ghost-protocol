@@ -61,7 +61,12 @@ android {
     }
     buildFeatures { compose = true }
 
-    packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
+    packaging {
+        resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        // Desktop natives and libsignal's test-only library must not ship in a phone APK.
+        resources.excludes += listOf("/*.dll", "/*.dylib", "/*.so")
+        jniLibs.excludes += "**/libsignal_jni_testing.so"
+    }
 }
 
 dependencies {
