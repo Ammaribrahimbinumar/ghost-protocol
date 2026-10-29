@@ -20,7 +20,9 @@ Read together with `THREAT_MODEL.md` and `FEATURE_REPORT.md`.
 - **Screenshots/recording.** FLAG_SECURE blocks standard capture paths only.
 - **Disappearing messages and deletion** cannot remove copies a recipient or compromised device already has.
 - **Removed group members** keep what they received before removal.
-- **Duress/decoy mode** (when built) does not defeat forensic analysis or guarantee safety under coercion.
+- **Duress/decoy mode** does not defeat forensic analysis or guarantee safety under coercion. Someone who knows the app has a decoy mode can demand the real code; flash storage may retain remnants after erase; the relay account and queued messages are untouched by a wipe.
+- **Groups** use pairwise fan-out; the relay sees each member message separately, and only the creator can change membership. **Attachments** are 1:1 only, ≤1 MiB.
+- **Not implemented:** linked devices, notifications, Tor/I2P, sealed sender, SQLCipher, group attachments. Never run on a physical phone; no security audit or penetration test exists.
 - **No recovery path.** A forgotten unlock code means wiping app data; there is deliberately no backdoor. With backups disabled, lost devices mean lost history.
 - **Throttling uses the wall clock;** someone who can move the device clock forward can skip a lockout.
 - **JVM memory.** Zeroing buffers reduces exposure, but Strings drawn to the screen and runtime copies cannot be wiped.
