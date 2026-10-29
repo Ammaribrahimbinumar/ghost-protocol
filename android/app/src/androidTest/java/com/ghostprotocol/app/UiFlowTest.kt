@@ -6,6 +6,7 @@ import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
@@ -62,6 +63,29 @@ class UiFlowTest {
                 assertTrue("FLAG_SECURE must still be set after unlock",
                     act.window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE != 0)
             }
+        }
+    }
+
+    @Test fun settingsCanSetDecoyAndDuressCodesAndWrongEntriesAreHandled() {
+        ActivityScenario.launch(MainActivity::class.java).use {
+            waitFor("Set up"); type("246802"); tap("Confirm"); waitFor("Enter the same code again to confirm."); type("246802"); tap("Confirm")
+            rule.waitUntil(30_000) { rule.onAllNodesWithText("÷").fetchSemanticsNodes().isNotEmpty() }
+            type("246802"); tap("="); waitFor("Join a relay")
+            tap("Settings"); waitFor("Decoy code")
+            // decoy: 1357 twice
+            rule.onAllNodesWithContentDescription("Set")[0].performClick()
+            waitFor("Set decoy code"); type("1357"); tap("Confirm"); waitFor("Enter the same code again."); type("1357"); tap("Confirm")
+            waitFor("Decoy code")
+            // duress: same digits as the decoy must be refused
+            rule.onAllNodesWithContentDescription("Set")[0].performClick()
+            waitFor("Set duress code"); type("1357"); tap("Confirm"); waitFor("Enter the same code again."); type("1357"); tap("Confirm")
+            waitFor("Decoy code")
+            val v = com.ghostprotocol.app.security.UnlockVerifier(com.ghostprotocol.app.security.KeystoreSecretStore(java.io.File(ctx.filesDir, "unlock.rec"), alias = "ghost_unlock_v1"))
+            assertTrue(v.hasDecoy()); assertTrue("same digits as decoy must be refused", !v.hasDuress())
+            rule.onAllNodesWithContentDescription("Set")[0].performClick()
+            waitFor("Set duress code"); type("8642"); tap("Confirm"); waitFor("Enter the same code again."); type("8642"); tap("Confirm")
+            waitFor("Decoy code")
+            assertTrue(v.hasDuress())
         }
     }
 }

@@ -95,6 +95,25 @@ fun MessagingApp(controller: AppController, findings: List<RiskFinding>, onLock:
     }
     DisposableEffect(Unit) { onDispose { controller.lock() } }
 
+    if (screen == Screen.Settings && settings != null) {
+        SettingsScreen(settings, onBack = { screen = Screen.Contacts }, onSetCode = { screen = Screen.SetCode(it) }, onWipe = { controller.wipeAll(); screen = Screen.Contacts })
+        return
+    }
+    if (screen is Screen.SetCode && settings != null) {
+        val s = screen as Screen.SetCode
+        CodeEntryScreen(
+            title = if (s.duress) "Set duress code" else "Set decoy code",
+            intro = if (s.duress) "Typing this code on the calculator ERASES all real data on this phone at once and then opens the empty decoy profile. It cannot be undone. Pick digits different from your main code."
+            else "Typing this code opens a separate, empty profile instead of your real chats. Pick digits different from your main code.",
+            onDone = { code ->
+                if (code != null) {
+                    try { if (s.duress) settings.configureDuress(code) else settings.configureDecoy(code); code.fill('\u0000') } catch (e: Exception) { code.fill('\u0000'); screen = Screen.Settings; return@CodeEntryScreen "That code is not allowed: ${e.message}" }
+                }
+                screen = Screen.Settings; null
+            },
+        )
+        return
+    }
     when (val p = phase) {
         Phase.Loading -> Centered("Loading…")
         is Phase.Broken -> Column(Modifier.fillMaxSize().background(Bg).systemBarsPadding().padding(24.dp), verticalArrangement = Arrangement.Center) {
@@ -111,6 +130,7 @@ fun MessagingApp(controller: AppController, findings: List<RiskFinding>, onLock:
             submitLabel = "Register", notice = notice, busy = busy,
             onSubmit = { v -> controller.register(v[0], v[1], v[2]) },
             onCancel = onLock,
+            extraLabel = if (settings != null) "Settings" else null, onExtra = { screen = Screen.Settings },
         )
         Phase.Ready -> when (val s = screen) {
             Screen.Contacts -> ContactsScreen(
@@ -119,18 +139,7 @@ fun MessagingApp(controller: AppController, findings: List<RiskFinding>, onLock:
                 onNewGroup = { screen = Screen.NewGroup }, onBroadcast = { screen = Screen.Broadcast },
                 onSettings = if (settings != null) ({ screen = Screen.Settings }) else null, onLock = onLock,
             )
-            Screen.Settings -> SettingsScreen(settings!!, onBack = { screen = Screen.Contacts }, onSetCode = { screen = Screen.SetCode(it) }, onWipe = { controller.wipeAll(); screen = Screen.Contacts })
-            is Screen.SetCode -> CodeEntryScreen(
-                title = if (s.duress) "Set duress code" else "Set decoy code",
-                intro = if (s.duress) "Typing this code on the calculator ERASES all real data on this phone at once and then opens the empty decoy profile. It cannot be undone. Pick digits different from your main code."
-                else "Typing this code opens a separate, empty profile instead of your real chats. Pick digits different from your main code.",
-                onDone = { code ->
-                    if (code != null) {
-                        try { if (s.duress) settings!!.configureDuress(code) else settings!!.configureDecoy(code); code.fill('\u0000') } catch (e: Exception) { code.fill('\u0000'); screen = Screen.Settings; return@CodeEntryScreen "That code is not allowed: ${e.message}" }
-                    }
-                    screen = Screen.Settings; null
-                },
-            )
+            Screen.Settings, is Screen.SetCode -> Unit   // handled above
             Screen.NewGroup -> PickerScreen(controller, "New group", "Group name", "Create", needText = true, onBack = { screen = Screen.Contacts }) { name, picked -> controller.createGroup(name, picked); screen = Screen.Contacts }
             Screen.Broadcast -> PickerScreen(controller, "Broadcast", "Message", "Send to selected", needText = true, onBack = { screen = Screen.Contacts }) { text, picked -> controller.broadcast(picked, text); screen = Screen.Contacts }
             is Screen.GroupChat -> GroupChatScreen(controller, s.id, onBack = { controller.openGroupChat(null); screen = Screen.Contacts }, onMembers = { screen = Screen.Members(s.id) })
@@ -168,6 +177,7 @@ class Field(val label: String, val hint: String, val max: Int)
 fun FormScreen(
     title: String, intro: String, fields: List<Field>, submitLabel: String,
     notice: String?, busy: Boolean, onSubmit: (List<String>) -> Unit, onCancel: () -> Unit,
+    extraLabel: String? = null, onExtra: () -> Unit = {},
 ) {
     val buffers = remember { fields.map { SecureInputBuffer(it.max) } }
     var active by remember { mutableIntStateOf(0) }
@@ -194,6 +204,7 @@ fun FormScreen(
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 KeyCap("Cancel", Modifier.weight(1f), fontSize = 16.sp) { onCancel() }
+                if (extraLabel != null) KeyCap(extraLabel, Modifier.weight(1f), fontSize = 16.sp) { onExtra() }
                 KeyCap(if (busy) "Working…" else submitLabel, Modifier.weight(1f), fontSize = 16.sp) {
                     if (!busy) onSubmit(buffers.map { it.asString() })
                 }
