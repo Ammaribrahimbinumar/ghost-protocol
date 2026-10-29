@@ -23,6 +23,10 @@ android {
         versionCode = 1
         versionName = "0.1.0-phase1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Optional: -PghostAbis=arm64-v8a builds a much smaller APK for real phones.
+        providers.gradleProperty("ghostAbis").orNull?.let { abis ->
+            ndk { abiFilters += abis.split(",").map { it.trim() }.filter { it.isNotEmpty() } }
+        }
     }
 
     // Signing material is supplied from the environment / a local, untracked
