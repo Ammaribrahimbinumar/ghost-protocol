@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -71,7 +72,7 @@ class UiFlowTest {
             waitFor("Set up"); type("246802"); tap("Confirm"); waitFor("Enter the same code again to confirm."); type("246802"); tap("Confirm")
             rule.waitUntil(30_000) { rule.onAllNodesWithText("÷").fetchSemanticsNodes().isNotEmpty() }
             type("246802"); tap("="); waitFor("Join a relay")
-            tap("Settings"); waitFor("Decoy code")
+            rule.onNodeWithContentDescription("Settings").performScrollTo().performClick(); waitFor("Decoy code")
             // decoy: 1357 twice
             rule.onAllNodesWithContentDescription("Set")[0].performClick()
             waitFor("Set decoy code"); type("1357"); tap("Confirm"); waitFor("Enter the same code again."); type("1357"); tap("Confirm")
