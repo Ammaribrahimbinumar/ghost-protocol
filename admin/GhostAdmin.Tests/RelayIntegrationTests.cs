@@ -95,3 +95,22 @@ public class WindowTests
         }
     }
 }
+
+public class DialogLayoutTests
+{
+    [SkippableTheory]
+    [InlineData(1.0f)] [InlineData(1.5f)] [InlineData(2.0f)]
+    public void FirstRunDialogShowsAllContentAtAnyTextSize(float scale)
+    {
+        Skip.IfNot(OperatingSystem.IsWindows(), "Windows only");
+        using var d = new PasswordDialog("Create the admin password",
+            "First run. Choose the admin password. It protects everything this app stores on this PC and is asked before every action. If you forget it there is NO recovery: the encrypted data cannot be opened.", true);
+        d.Font = new System.Drawing.Font(d.Font.FontFamily, d.Font.Size * scale);
+        d.Show(); System.Windows.Forms.Application.DoEvents();
+        Skip.IfNot(d.IsHandleCreated, "no window handle in this session");
+        var need = d.Content.PreferredSize;
+        Assert.True(d.ClientSize.Height >= need.Height, $"window {d.ClientSize} is smaller than its content {need}");
+        Assert.True(d.ClientSize.Width >= need.Width, $"window {d.ClientSize} is narrower than its content {need}");
+        Assert.True(d.Content.Bottom <= d.ClientSize.Height + 1);
+    }
+}

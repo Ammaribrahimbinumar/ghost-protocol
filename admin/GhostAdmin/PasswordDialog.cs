@@ -5,19 +5,22 @@ namespace GhostAdmin;
 /// <summary>Asks for the admin password (twice when creating it). The text box masks input.</summary>
 public sealed class PasswordDialog : SecureForm
 {
-    private readonly TextBox _pw = new() { UseSystemPasswordChar = true, Width = 320 };
-    private readonly TextBox _pw2 = new() { UseSystemPasswordChar = true, Width = 320 };
-    private readonly Label _note = new() { AutoSize = true, MaximumSize = new Size(340, 0), ForeColor = Color.Firebrick };
+    private readonly TextBox _pw = new() { UseSystemPasswordChar = true, Width = 400 };
+    private readonly TextBox _pw2 = new() { UseSystemPasswordChar = true, Width = 400 };
+    private readonly Label _note = new() { AutoSize = true, MaximumSize = new Size(420, 0), ForeColor = Color.Firebrick };
     private readonly bool _confirm;
     public string? Password { get; private set; }
+    public Control Content => Controls[0];
 
     public PasswordDialog(string title, string message, bool confirm, string? note = null)
     {
         _confirm = confirm;
         Text = title; FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false;
-        StartPosition = FormStartPosition.CenterParent; ShowInTaskbar = false; ClientSize = new Size(380, confirm ? 220 : 170);
-        var panel = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(14) };
-        panel.Controls.Add(new Label { Text = message, AutoSize = true, MaximumSize = new Size(340, 0) });
+        StartPosition = FormStartPosition.CenterParent; ShowInTaskbar = false;
+        // The window grows to fit its content (long first-run text, large fonts, high-DPI screens).
+        AutoSize = true; AutoSizeMode = AutoSizeMode.GrowAndShrink; MinimumSize = new Size(400, 0);
+        var panel = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(14) };
+        panel.Controls.Add(new Label { Text = message, AutoSize = true, MaximumSize = new Size(420, 0) });
         panel.Controls.Add(_pw);
         if (confirm) { panel.Controls.Add(new Label { Text = "Type it again:", AutoSize = true }); panel.Controls.Add(_pw2); }
         _note.Text = note ?? ""; panel.Controls.Add(_note);
