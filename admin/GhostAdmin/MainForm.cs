@@ -122,6 +122,9 @@ public sealed class MainForm : SecureForm
             var cf = TunnelHost.FindExecutable(_vault.Data.CloudflaredPath)
                 ?? throw new InvalidOperationException("Cloudflare's cloudflared program was not found. Install it once with:  winget install --id Cloudflare.cloudflared  and then start again.");
 
+            foreach (var port in new[] { _vault.Data.RelayPort, _vault.Data.AdminPort })
+                if (!PortCheck.IsFree(port))
+                    throw new InvalidOperationException($"Port {port} is already in use by another program. Most likely an old relay is still running (for example from the PowerShell window you used before). Close that window, or end \"ghost-relay\" in Task Manager, then click Start again.");
             SetStatus("Starting the relay...");
             _relay = new RelayHost(relayExe, _vault.Data.RelayPort, _vault.Data.AdminPort, _vault.Data.AdminToken);
             _relay.Start();

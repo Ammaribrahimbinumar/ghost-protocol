@@ -65,6 +65,24 @@ public class RelayIntegrationTests
         finally { try { Directory.Delete(dir, true); } catch (IOException) { } }
     }
 
+    [SkippableFact] public async Task AnOldRelayAlreadyOnThePortIsNotMistakenForTheNewOne()
+    {
+        Skip.If(Exe == null, "GHOST_RELAY_EXE not provided");
+        int pub = FreePort(), adm = FreePort();
+        using var impostor = new HttpListener(); impostor.Prefixes.Add($"http://127.0.0.1:{pub}/"); impostor.Start();
+        var serve = Task.Run(async () => { try { while (true) { var c = await impostor.GetContextAsync(); c.Response.StatusCode = 204; c.Response.Close(); } } catch (Exception) { } });
+        Assert.False(PortCheck.IsFree(pub), "the pre-start check must see the busy port");
+        using var relay = new RelayHost(Exe!, pub, adm, Token); relay.Start();
+        Assert.False(await relay.WaitHealthyAsync(TimeSpan.FromSeconds(6)), "must not report healthy when another program answers on the port");
+        impostor.Stop();
+    }
+
+    [Fact] public void PortCheckSeesFreeAndBusyPorts()
+    {
+        var l = new TcpListener(IPAddress.Loopback, 0); l.Start(); var p = ((IPEndPoint)l.LocalEndpoint).Port;
+        Assert.False(PortCheck.IsFree(p)); l.Stop(); Assert.True(PortCheck.IsFree(p));
+    }
+
     [SkippableFact] public async Task StoppingTheHostStopsTheRelay()
     {
         Skip.If(Exe == null, "GHOST_RELAY_EXE not provided");

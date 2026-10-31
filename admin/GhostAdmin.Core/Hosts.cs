@@ -42,6 +42,22 @@ public abstract class ChildHost : IDisposable
     public void Dispose() => Stop();
 }
 
+public static class PortCheck
+{
+    /// <summary>True if nothing on this PC is listening on the loopback port.</summary>
+    public static bool IsFree(int port)
+    {
+        try { var l = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, port); l.Start(); l.Stop(); return true; }
+        catch (System.Net.Sockets.SocketException) { return false; }
+    }
+
+    public static async Task<bool> CanConnectAsync(int port)
+    {
+        try { using var c = new System.Net.Sockets.TcpClient(); using var cts = new CancellationTokenSource(1500); await c.ConnectAsync(System.Net.IPAddress.Loopback, port, cts.Token); return true; }
+        catch (Exception) { return false; }
+    }
+}
+
 /// <summary>The relay: public port for users, a separate loopback-only port for admin actions, addresses kept in memory only.</summary>
 public sealed class RelayHost : ChildHost
 {
@@ -67,7 +83,14 @@ public sealed class RelayHost : ChildHost
         while (DateTime.UtcNow < end)
         {
             if (!Running) return false;
-            try { using var r = await http.GetAsync($"http://127.0.0.1:{Port}/healthz"); if ((int)r.StatusCode == 204) return true; } catch (Exception) { }
+            try
+            {
+                using var r = await http.GetAsync($"http://127.0.0.1:{Port}/healthz");
+                // Only count it if OUR relay is the one answering: it must still be alive and its admin port must be open.
+                // (An old relay left running by an earlier test would answer /healthz too.)
+                if ((int)r.StatusCode == 204) { await Task.Delay(400); if (Running && await PortCheck.CanConnectAsync(AdminPort)) return true; }
+            }
+            catch (Exception) { }
             await Task.Delay(250);
         }
         return false;
