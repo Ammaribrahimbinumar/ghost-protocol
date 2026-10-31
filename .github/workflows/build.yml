@@ -126,3 +126,42 @@ jobs:
         with:
           name: device-test-results
           path: android/app/build/outputs/androidTest-results/
+
+  admin-app:
+    # The Windows admin program (password-gated relay + tunnel control). Built and tested on a real Windows runner.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.24' }
+      - uses: actions/setup-dotnet@v4
+        with: { dotnet-version: '8.0.x' }
+      - name: Build the relay program
+        shell: bash
+        run: |
+          mkdir -p dist && cd relay && GOOS=windows GOARCH=amd64 go build -trimpath -o ../dist/ghost-relay.exe .
+      - name: Build and test the admin app
+        shell: pwsh
+        run: |
+          $env:GHOST_RELAY_EXE = (Resolve-Path dist/ghost-relay.exe).Path
+          dotnet test admin/GhostAdmin.Tests -c Release --logger "trx;LogFileName=results.trx" --results-directory admin-results 2>&1 | Tee-Object build.log
+          $code = $LASTEXITCODE
+          if ($code -ne 0) { Select-String -Path build.log -Pattern ' error ' | Select-Object -First 25 | ForEach-Object { "::error::" + $_.Line.Trim() } }
+          python .github/scripts/summarize_trx.py admin-results
+          if ($code -ne 0) { exit $code }
+      - name: Publish a single-file Windows program
+        shell: pwsh
+        run: |
+          dotnet publish admin/GhostAdmin -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true -o admin-out 2>&1 | Tee-Object publish.log
+          if ($LASTEXITCODE -ne 0) { Select-String -Path publish.log -Pattern ' error ' | Select-Object -First 25 | ForEach-Object { "::error::" + $_.Line.Trim() }; exit 1 }
+          New-Item -ItemType Directory -Force -Path package | Out-Null
+          Copy-Item admin-out/GhostAdmin.exe package/
+          Copy-Item dist/ghost-relay.exe package/
+          Copy-Item admin/README.md package/README.txt
+          Get-ChildItem package -File | ForEach-Object { "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name } | Set-Content package/SHA256SUMS.txt
+          Get-ChildItem package | ForEach-Object { "::notice title=package::{0} {1} bytes" -f $_.Name, $_.Length }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: admin-app
+          path: package/
+
