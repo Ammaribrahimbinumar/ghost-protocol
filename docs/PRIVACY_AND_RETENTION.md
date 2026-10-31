@@ -8,7 +8,7 @@ Describes what the **implemented relay** does today and what the client is inten
 | Message ciphertext | Yes, until acknowledged or expired | Memory only | Default 7 days (`-ttl-hours`); never written to disk; lost on restart |
 | Username, mailbox ID, ECDSA P-256 auth public key, public key bundle, one-time prekeys | Yes | `accounts.json` (0600) | Until the account is deleted |
 | Invitation codes | Only SHA-256 hash until used; deleted on use | `accounts.json` | Until used |
-| Client IP address | Not stored or logged | Used transiently; rate-limit keys are HMACs under an in-memory salt rotated every 24 h | Minutes |
+| Client IP address | Not stored or logged by default. **If the operator starts the relay with `-record-ip` (the Windows admin app does), the last address each account connected from is kept in memory only, shown in the admin user list, never written to disk or logs, and forgotten on restart.** Users should be told. | Used transiently; rate-limit keys are HMACs under an in-memory salt rotated every 24 h | Minutes |
 | Request signatures/nonces | Nonces kept to block replay | Memory | About 2 minutes |
 | Request logs | None written by the relay | — | — |
 | Analytics, telemetry, third-party SDKs | None | — | — |

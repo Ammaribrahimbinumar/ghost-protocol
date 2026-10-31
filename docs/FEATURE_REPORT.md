@@ -39,6 +39,8 @@ No security audit and no penetration test has been performed by anyone. Nothing 
 | Erase everything now | PASS (emulator) | Relay account and queued messages are not touched |
 | Release hardening (R8, libsignal keep rules, log stripping) | PASS (release crypto pass on emulator) | Found and fixed a real JNI crash |
 | Signed release APK | BLOCKED here | Signing key must exist only on your machine; see BUILD_AND_SIGNING.md |
+| Windows admin app (GhostAdmin.exe): start relay + Cloudflare tunnel, invite codes, user list with addresses | BUILT. PASS on a Windows CI runner: 16 tests (encrypted vault round-trip, wrong password, single-byte tampering, nothing readable on disk, gate delays, tunnel-address parsing, the real relay driven through the app's classes incl. admin port not on public port, snapshot restore, window capture exclusion flag read back) | The window layout, buttons and the start/stop/invite/user-list screens were NEVER run or seen by me; the tunnel start from the app is untested against real Cloudflare. Unsigned exe. Not audited |
+| Per-action password prompt in the admin app | BUILT, gate logic PASS (JVM-style unit tests); the dialog flow itself NOT RUN | |
 | Linked devices / revocation | NOT IMPLEMENTED | |
 | Launcher icon (generic calculator, adaptive + themed) | BUILT; resources compile and the build passes; rendered preview checked by me | Not yet seen on a real phone launcher |
 | Generic notification "Calculator got an update" | PASS (emulator: only on arrival while off-screen; title/text fixed; no sender, text, count or buttons; none while app is on screen; none when switched off) | Real-phone behaviour NOT RUN |
