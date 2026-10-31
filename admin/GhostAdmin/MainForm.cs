@@ -13,40 +13,83 @@ public sealed class MainForm : SecureForm
     private bool _busy;
     private DateTime _usersVisibleUntil = DateTime.MinValue;
 
-    private readonly Label _status = new() { AutoSize = true, MaximumSize = new Size(700, 0) };
-    private readonly TextBox _address = new() { ReadOnly = true, Width = 520 };
-    private readonly TextBox _invite = new() { ReadOnly = true, Width = 320, Font = new Font(FontFamily.GenericMonospace, 10f) };
-    private readonly Button _start = new() { Text = "Start server + tunnel", Width = 170 };
-    private readonly Button _stop = new() { Text = "Stop", Width = 80, Enabled = false };
-    private readonly Button _copyAddress = new() { Text = "Copy address", Width = 110 };
-    private readonly Button _newInvite = new() { Text = "Request invite code", Width = 170, Enabled = false };
-    private readonly Button _copyInvite = new() { Text = "Copy invite message", Width = 150 };
-    private readonly Button _showUsers = new() { Text = "Show registered users", Width = 170, Enabled = false };
-    private readonly Button _hideUsers = new() { Text = "Hide", Width = 70, Visible = false };
-    private readonly Label _usersNote = new() { AutoSize = true, MaximumSize = new Size(700, 0), Visible = false };
+    private static Button Btn(string text, bool enabled = true, bool visible = true) => new()
+    {
+        Text = text, Enabled = enabled, Visible = visible,
+        AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,   // always as wide as its text needs
+        Padding = new Padding(10, 4, 10, 4), MinimumSize = new Size(80, 30), Margin = new Padding(0, 3, 8, 3),
+        UseCompatibleTextRendering = false,
+    };
+    private static Label Wrap(string text = "", bool visible = true) => new() { Text = text, AutoSize = true, Visible = visible, Margin = new Padding(0, 4, 0, 2) };
+    private static TextBox Box(Font? mono = null) { var t = new TextBox { ReadOnly = true, Dock = DockStyle.Fill, Margin = new Padding(0, 3, 8, 3) }; if (mono != null) t.Font = mono; return t; }
+
+    private readonly Label _status = Wrap();
+    private readonly TextBox _address = Box();
+    private readonly TextBox _invite = Box(new Font(FontFamily.GenericMonospace, 10f));
+    private readonly Button _start = Btn("Start server + tunnel");
+    private readonly Button _stop = Btn("Stop", enabled: false);
+    private readonly Button _copyAddress = Btn("Copy address");
+    private readonly Button _newInvite = Btn("Request invite code", enabled: false);
+    private readonly Button _copyInvite = Btn("Copy invite message");
+    private readonly Button _showUsers = Btn("Show registered users", enabled: false);
+    private readonly Button _hideUsers = Btn("Hide", visible: false);
+    private readonly Label _usersNote = Wrap(visible: false);
     private readonly DataGridView _grid = new()
     {
-        Dock = DockStyle.Fill, ReadOnly = true, AllowUserToAddRows = false, RowHeadersVisible = false,
-        AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill, SelectionMode = DataGridViewSelectionMode.FullRowSelect, Visible = false,
+        Dock = DockStyle.Fill, ReadOnly = true, AllowUserToAddRows = false, RowHeadersVisible = false, Visible = false,
+        AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.Fill, SelectionMode = DataGridViewSelectionMode.FullRowSelect,
+        ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize, AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.AllCells,
     };
     private readonly System.Windows.Forms.Timer _tick = new() { Interval = 5000 };
+
+    private static FlowLayoutPanel Row(params Control[] c)
+    {
+        // Wraps onto a second line on narrow windows instead of cutting buttons off.
+        var p = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, FlowDirection = FlowDirection.LeftToRight, WrapContents = true, Dock = DockStyle.Fill, Margin = new Padding(0, 2, 0, 2) };
+        foreach (var x in c) p.Controls.Add(x);
+        return p;
+    }
+
+    /// <summary>A text box that stretches with the window, with a button of its natural width beside it.</summary>
+    private static TableLayoutPanel Stretch(TextBox box, Button button)
+    {
+        var t = new TableLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, ColumnCount = 2, RowCount = 1, Dock = DockStyle.Fill, Margin = new Padding(0, 2, 0, 2) };
+        t.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); t.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        t.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        t.Controls.Add(box, 0, 0); t.Controls.Add(button, 1, 0);
+        return t;
+    }
 
     public MainForm(Vault vault)
     {
         _vault = vault; _gate = new PasswordGate(vault);
-        Text = "Ghost admin"; ClientSize = new Size(760, 560); MinimumSize = new Size(640, 480); StartPosition = FormStartPosition.CenterScreen;
+        Text = "Ghost admin"; StartPosition = FormStartPosition.CenterScreen; MinimumSize = new Size(480, 420);
+        var area = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1024, 768);
+        ClientSize = new Size(Math.Min(820, (int)(area.Width * 0.8)), Math.Min(620, (int)(area.Height * 0.8)));
 
-        var top = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Padding = new Padding(12) };
-        top.Controls.Add(_status);
-        var r1 = Row(_start, _stop); top.Controls.Add(r1);
-        top.Controls.Add(new Label { Text = "Relay address (give this to your users):", AutoSize = true });
-        top.Controls.Add(Row(_address, _copyAddress));
-        top.Controls.Add(Row(_newInvite));
-        top.Controls.Add(new Label { Text = "Invitation code (single use):", AutoSize = true });
-        top.Controls.Add(Row(_invite, _copyInvite));
-        top.Controls.Add(Row(_showUsers, _hideUsers));
-        top.Controls.Add(_usersNote);
-        Controls.Add(_grid); Controls.Add(top);
+        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, Padding = new Padding(14) };
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        void Add(Control c, bool fill = false)
+        {
+            root.RowStyles.Add(fill ? new RowStyle(SizeType.Percent, 100) : new RowStyle(SizeType.AutoSize));
+            root.Controls.Add(c, 0, root.RowCount++);
+        }
+        root.RowCount = 0;
+        Add(_status);
+        Add(Row(_start, _stop));
+        Add(Wrap("Relay address (give this to your users):"));
+        Add(Stretch(_address, _copyAddress));
+        Add(Row(_newInvite));
+        Add(Wrap("Invitation code (single use):"));
+        Add(Stretch(_invite, _copyInvite));
+        Add(Row(_showUsers, _hideUsers));
+        Add(_usersNote);
+        Add(_grid, fill: true);
+        Controls.Add(root);
+
+        // Long messages wrap to the current window width instead of running off the edge.
+        void FitText() { var w = Math.Max(200, ClientSize.Width - root.Padding.Horizontal - 8); _status.MaximumSize = new Size(w, 0); _usersNote.MaximumSize = new Size(w, 0); }
+        Resize += (_, _) => FitText(); Shown += (_, _) => FitText(); FitText();
 
         _grid.Columns.Add("u", "Username"); _grid.Columns.Add("ip", "Address (last seen)");
         _grid.Columns.Add("seen", "Last seen"); _grid.Columns.Add("created", "Registered"); _grid.Columns.Add("q", "Waiting messages");
@@ -61,13 +104,6 @@ public sealed class MainForm : SecureForm
         _tick.Tick += async (_, _) => await OnTick();
         FormClosing += OnClosing;
         SetStatus("Stopped. Click \"Start server + tunnel\".");
-    }
-
-    private static FlowLayoutPanel Row(params Control[] c)
-    {
-        var p = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, Margin = new Padding(0, 4, 0, 4) };
-        foreach (var x in c) p.Controls.Add(x);
-        return p;
     }
 
     private void SetStatus(string s) => _status.Text = s;

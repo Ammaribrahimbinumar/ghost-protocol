@@ -114,3 +114,39 @@ public class DialogLayoutTests
         Assert.True(d.Content.Bottom <= d.ClientSize.Height + 1);
     }
 }
+
+public class MainWindowLayoutTests
+{
+    private static IEnumerable<Control> All(Control c) { foreach (Control k in c.Controls) { yield return k; foreach (var d in All(k)) yield return d; } }
+
+    [SkippableTheory]
+    [InlineData(1.0f, 480, 420)] [InlineData(1.5f, 480, 420)] [InlineData(2.0f, 480, 420)] [InlineData(1.0f, 900, 600)] [InlineData(1.5f, 700, 500)]
+    public void NoButtonTextIsCutOffAndNothingRunsOffTheWindow(float scale, int width, int height)
+    {
+        Skip.IfNot(OperatingSystem.IsWindows(), "Windows only");
+        var path = Path.Combine(Path.GetTempPath(), "gl-" + Guid.NewGuid().ToString("N") + ".bin");
+        try
+        {
+            using var vault = Vault.Create(path, "correct horse battery", 100_000);
+            using var f = new GhostAdmin.MainForm(vault);
+            f.Font = new System.Drawing.Font(f.Font.FontFamily, f.Font.Size * scale);
+            f.ClientSize = new System.Drawing.Size(width, height);
+            f.Show(); System.Windows.Forms.Application.DoEvents(); f.PerformLayout(); System.Windows.Forms.Application.DoEvents();
+            Skip.IfNot(f.IsHandleCreated, "no window handle in this session");
+            foreach (var b in All(f).OfType<Button>().Where(x => x.Visible))
+            {
+                var text = TextRenderer.MeasureText(b.Text, b.Font);
+                Assert.True(b.Width >= text.Width, $"button '{b.Text}' is {b.Width}px wide but its text needs {text.Width}px (scale {scale}, window {width}x{height})");
+                Assert.True(b.Height >= text.Height, $"button '{b.Text}' is {b.Height}px high but its text needs {text.Height}px");
+                var r = f.RectangleToClient(b.RectangleToScreen(b.ClientRectangle));
+                Assert.True(r.Left >= 0 && r.Right <= f.ClientSize.Width, $"button '{b.Text}' sticks out of the window: {r} in {f.ClientSize}");
+            }
+            foreach (var t in All(f).OfType<TextBox>().Where(x => x.Visible))
+            {
+                var r = f.RectangleToClient(t.RectangleToScreen(t.ClientRectangle));
+                Assert.True(r.Right <= f.ClientSize.Width && t.Width > 40, $"text box too narrow or outside: {r}");
+            }
+        }
+        finally { try { File.Delete(path); } catch (IOException) { } }
+    }
+}

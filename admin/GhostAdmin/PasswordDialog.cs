@@ -24,10 +24,10 @@ public sealed class PasswordDialog : SecureForm
         panel.Controls.Add(_pw);
         if (confirm) { panel.Controls.Add(new Label { Text = "Type it again:", AutoSize = true }); panel.Controls.Add(_pw2); }
         _note.Text = note ?? ""; panel.Controls.Add(_note);
-        var ok = new Button { Text = "OK", DialogResult = DialogResult.None, Width = 90 };
-        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, Width = 90 };
+        var ok = new Button { Text = "OK", DialogResult = DialogResult.None, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(10, 4, 10, 4), MinimumSize = new Size(80, 30) };
+        var cancel = new Button { Text = "Cancel", DialogResult = DialogResult.Cancel, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Padding = new Padding(10, 4, 10, 4), MinimumSize = new Size(80, 30) };
         ok.Click += (_, _) => Accept();
-        var row = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.LeftToRight };
+        var row = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, FlowDirection = FlowDirection.LeftToRight };
         row.Controls.Add(ok); row.Controls.Add(cancel); panel.Controls.Add(row);
         Controls.Add(panel); AcceptButton = ok; CancelButton = cancel;
         FormClosed += (_, _) => { _pw.Clear(); _pw2.Clear(); };
