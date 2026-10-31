@@ -119,3 +119,25 @@ public class ParserTests
         Assert.Contains("https://x.trycloudflare.com", m); Assert.Contains("CODE123", m);
     }
 }
+
+public class RetryTests
+{
+    [Fact] public async Task KeepsTryingUntilItWorksAndAlternatesConnectionType()
+    {
+        var kinds = new List<bool>(); var seen = new List<int>();
+        var n = await TunnelRetry.RunAsync(h => { kinds.Add(h); return Task.FromResult(kinds.Count == 4); }, 8, TimeSpan.Zero, (i, m) => seen.Add(i));
+        Assert.Equal(4, n); Assert.Equal(new[] { false, true, false, true }, kinds); Assert.Equal(new[] { 1, 2, 3, 4 }, seen);
+    }
+    [Fact] public async Task GivesUpAfterTheLimit()
+    {
+        int calls = 0;
+        var n = await TunnelRetry.RunAsync(_ => { calls++; return Task.FromResult(false); }, 5, TimeSpan.Zero);
+        Assert.Equal(0, n); Assert.Equal(5, calls);
+    }
+    [Fact] public async Task StopsAtOnceWhenCancelled()
+    {
+        using var cts = new CancellationTokenSource(); int calls = 0;
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => TunnelRetry.RunAsync(_ => { calls++; cts.Cancel(); return Task.FromResult(false); }, 8, TimeSpan.FromSeconds(30), null, cts.Token));
+        Assert.Equal(1, calls);
+    }
+}

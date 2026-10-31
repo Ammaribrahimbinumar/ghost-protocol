@@ -130,15 +130,19 @@ public sealed class MainForm : SecureForm
             _admin = new RelayAdminClient(_vault.Data.AdminPort, _vault.Data.AdminToken);
             if (!string.IsNullOrEmpty(_vault.Data.Snapshot)) await _admin.ImportAsync(_vault.Data.Snapshot!);
 
-            SetStatus("Starting the Cloudflare tunnel (this can take up to a minute)...");
             _tunnel = new TunnelHost();
-            _tunnel.Start(cf, _vault.Data.RelayPort, http2: false);
-            if (!await _tunnel.WaitForUrlAsync(TimeSpan.FromSeconds(30)))
+            var tunnel = _tunnel;
+            var tries = await TunnelRetry.RunAsync(async http2 =>
             {
-                _tunnel.Stop(); SetStatus("Retrying the tunnel with another connection type...");
-                _tunnel.Start(cf, _vault.Data.RelayPort, http2: true);
-                if (!await _tunnel.WaitForUrlAsync(TimeSpan.FromSeconds(40)))
-                    throw new InvalidOperationException("The tunnel did not give an address. Check your internet or turn off any VPN, then try again.\n" + _tunnel.Tail);
+                tunnel.Stop();
+                tunnel.Start(cf, _vault.Data.RelayPort, http2);
+                return await tunnel.WaitForUrlAsync(TimeSpan.FromSeconds(25));
+            }, maxAttempts: 8, pause: TimeSpan.FromSeconds(4),
+            progress: (n, max) => SetStatus($"Starting the Cloudflare tunnel... attempt {n} of {max}. Cloudflare's service sometimes needs a few tries on this connection; the app keeps trying."));
+            if (tries == 0)
+            {
+                var lines = tunnel.Tail.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+                throw new InvalidOperationException("The tunnel still did not give an address after 8 tries. Check your internet, turn off any VPN, or try your phone's hotspot, then click Start again.\nLast message: " + (lines.Length > 0 ? lines[^1] : "(none)"));
             }
             _address.Text = _tunnel.Url!;
             SetStatus("Running. The relay is on and the tunnel is up. The tunnel address changes every time you start it.");

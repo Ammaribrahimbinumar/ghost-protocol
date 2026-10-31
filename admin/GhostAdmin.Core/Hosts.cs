@@ -118,3 +118,24 @@ public sealed class TunnelHost : ChildHost
         return Url != null;
     }
 }
+
+/// <summary>Keeps trying to bring the tunnel up. Cloudflare's tunnel-creation request fails now and then on some connections, so one failure is not the end.</summary>
+public static class TunnelRetry
+{
+    /// <summary>
+    /// Calls <paramref name="attempt"/> (argument: use the HTTP/2 connection type) up to <paramref name="maxAttempts"/> times,
+    /// alternating the connection type and waiting between tries. Returns the attempt number that worked, or 0.
+    /// </summary>
+    public static async Task<int> RunAsync(Func<bool, Task<bool>> attempt, int maxAttempts, TimeSpan pause,
+        Action<int, int>? progress = null, CancellationToken cancel = default)
+    {
+        for (int i = 1; i <= maxAttempts; i++)
+        {
+            cancel.ThrowIfCancellationRequested();
+            progress?.Invoke(i, maxAttempts);
+            if (await attempt(i % 2 == 0)) return i;
+            if (i < maxAttempts) await Task.Delay(pause, cancel);
+        }
+        return 0;
+    }
+}
