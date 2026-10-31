@@ -517,3 +517,174 @@ func TestRelayImportsNoDecryptionPrimitives(t *testing.T) {
 }
 
 var _ = io.Discard
+
+// ---- admin listener, user list, recorded addresses --------------------------------
+
+func (e *env) adminReq(h http.Handler, method, path, token, remote string, hdr map[string]string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, path, nil)
+	req.RemoteAddr = remote
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	for k, v := range hdr {
+		req.Header.Set(k, v)
+	}
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	return rr
+}
+
+func TestAdminEndpointsAreRemovedFromPublicHandlerWhenSeparated(t *testing.T) {
+	e := newEnv(t, func(c *Config, _ *Store) { c.PublicAdmin = false })
+	status(t, e.raw("POST", "/v1/admin/invites", nil, map[string]string{"Authorization": "Bearer " + adminToken}), 404)
+	status(t, e.raw("GET", "/v1/admin/users", nil, map[string]string{"Authorization": "Bearer " + adminToken}), 404)
+	rr := e.adminReq(e.srv.AdminHandler(), "POST", "/v1/admin/invites", adminToken, "127.0.0.1:5555", nil)
+	if rr.Code != 201 {
+		t.Fatalf("admin listener should issue invites: %d", rr.Code)
+	}
+}
+
+func TestAdminHandlerRequiresTokenAndServesNothingElse(t *testing.T) {
+	e := newEnv(t, func(c *Config, _ *Store) { c.PublicAdmin = false })
+	h := e.srv.AdminHandler()
+	for _, tok := range []string{"", "wrong", adminToken + "x"} {
+		if rr := e.adminReq(h, "GET", "/v1/admin/users", tok, "127.0.0.1:1", nil); rr.Code != 401 {
+			t.Fatalf("token %q: %d", tok, rr.Code)
+		}
+	}
+	for _, path := range []string{"/v1/register", "/v1/inbox", "/v1/bundle/alice", "/healthz"} {
+		if rr := e.adminReq(h, "GET", path, adminToken, "127.0.0.1:1", nil); rr.Code != 404 && rr.Code != 405 {
+			t.Fatalf("%s must not be served by the admin listener: %d", path, rr.Code)
+		}
+	}
+}
+
+func TestUserListHidesAddressesUnlessRecordingIsOn(t *testing.T) {
+	e := newEnv(t, func(c *Config, _ *Store) { c.PublicAdmin = false })
+	apub, _ := newAuthKey(t)
+	abody, _ := json.Marshal(registerReq{Invite: e.invite2(), Username: "alice", AuthPub: apub, Bundle: []byte("b")})
+	if r := e.raw("POST", "/v1/register", abody, nil); r.StatusCode != 201 {
+		t.Fatal(r.StatusCode)
+	}
+	rr := e.adminReq(e.srv.AdminHandler(), "GET", "/v1/admin/users", adminToken, "127.0.0.1:1", nil)
+	var out struct {
+		Users []struct {
+			Username string `json:"username"`
+			IP       string `json:"ip"`
+		} `json:"users"`
+		RecordIP bool `json:"record_ip"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil || len(out.Users) != 1 || out.Users[0].Username != "alice" {
+		t.Fatalf("bad list %s %v", rr.Body.String(), err)
+	}
+	if out.Users[0].IP != "" || out.RecordIP || strings.Contains(rr.Body.String(), "127.0.0.1") {
+		t.Fatalf("address must not be exposed or kept when recording is off: %s", rr.Body.String())
+	}
+}
+
+func TestRecordedAddressComesFromCloudflareHeaderOnlyForLoopbackPeers(t *testing.T) {
+	e := newEnv(t, func(c *Config, _ *Store) { c.PublicAdmin = false; c.RecordIP = true; c.TrustProxyHeader = true })
+	// Registration over real loopback TCP (this is how cloudflared on the same PC reaches the relay) with the header.
+	pub, _ := newAuthKey(t)
+	body, _ := json.Marshal(registerReq{Invite: e.invite2(), Username: "bob", AuthPub: pub, Bundle: []byte("b"), Prekeys: nil})
+	resp := e.raw("POST", "/v1/register", body, map[string]string{"Cf-Connecting-Ip": "203.0.113.77"})
+	if resp.StatusCode != 201 {
+		t.Fatalf("register: %d", resp.StatusCode)
+	}
+	list := func() string {
+		return e.adminReq(e.srv.AdminHandler(), "GET", "/v1/admin/users", adminToken, "127.0.0.1:1", nil).Body.String()
+	}
+	if !strings.Contains(list(), `"ip":"203.0.113.77"`) {
+		t.Fatalf("header from a loopback peer should be used: %s", list())
+	}
+	// A request whose TCP peer is NOT loopback must not be able to choose the recorded address with a header.
+	h := e.srv.Handler()
+	pub2, _ := newAuthKey(t)
+	b2, _ := json.Marshal(registerReq{Invite: e.invite2(), Username: "carol", AuthPub: pub2, Bundle: []byte("b")})
+	req := httptest.NewRequest("POST", "/v1/register", bytes.NewReader(b2))
+	req.RemoteAddr = "198.51.100.9:4000"
+	req.Header.Set("Cf-Connecting-Ip", "10.9.9.9")
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != 201 {
+		t.Fatalf("register carol: %d %s", rr.Code, rr.Body.String())
+	}
+	l := list()
+	if strings.Contains(l, "10.9.9.9") || !strings.Contains(l, "198.51.100.9") {
+		t.Fatalf("spoofed header from a non-loopback peer must be ignored: %s", l)
+	}
+}
+
+func TestAddressesAreNeverWrittenToTheSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/accounts.json"
+	e := newEnv(t, func(c *Config, st *Store) { c.PublicAdmin = false; c.RecordIP = true; st.persistPath = path })
+	pub, _ := newAuthKey(t)
+	body, _ := json.Marshal(registerReq{Invite: e.invite2(), Username: "dave", AuthPub: pub, Bundle: []byte("b")})
+	if r := e.raw("POST", "/v1/register", body, nil); r.StatusCode != 201 {
+		t.Fatal(r.StatusCode)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || !strings.Contains(string(data), "dave") {
+		t.Fatalf("snapshot missing: %v", err)
+	}
+	if strings.Contains(string(data), "127.0.0.1") || strings.Contains(string(data), "last_seen") {
+		t.Fatalf("snapshot must not contain addresses: %s", data)
+	}
+}
+
+// invite2 issues an invite through the store directly (the public handler may not expose admin routes).
+func (e *env) invite2() string {
+	code, err := e.st.CreateInvite()
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return code
+}
+
+// ---- snapshot export/import (the admin app keeps the snapshot encrypted itself) ----------------
+
+func TestSnapshotExportImportRoundTripAndGuards(t *testing.T) {
+	e := newEnv(t, func(c *Config, _ *Store) { c.PublicAdmin = false })
+	h := e.srv.AdminHandler()
+	inv := e.adminReq(h, "POST", "/v1/admin/invites", adminToken, "127.0.0.1:1", nil)
+	if inv.Code != 201 {
+		t.Fatalf("invite: %d", inv.Code)
+	}
+	exp := e.adminReq(h, "GET", "/v1/admin/export", adminToken, "127.0.0.1:1", nil)
+	if exp.Code != 200 || !strings.Contains(exp.Body.String(), `"invites"`) {
+		t.Fatalf("export: %d %s", exp.Code, exp.Body.String())
+	}
+	if strings.Contains(exp.Body.String(), "127.0.0.1") {
+		t.Fatal("snapshot must never contain network addresses")
+	}
+	// token required, and neither endpoint exists on the public handler
+	if rr := e.adminReq(h, "GET", "/v1/admin/export", "wrong", "127.0.0.1:1", nil); rr.Code != 401 {
+		t.Fatalf("export without token: %d", rr.Code)
+	}
+	status(t, e.raw("GET", "/v1/admin/export", nil, map[string]string{"Authorization": "Bearer " + adminToken}), 404)
+	status(t, e.raw("POST", "/v1/admin/import", nil, map[string]string{"Authorization": "Bearer " + adminToken}), 404)
+	// a fresh relay accepts the snapshot; a non-empty one refuses it; garbage is rejected
+	e2 := newEnv(t, func(c *Config, _ *Store) { c.PublicAdmin = false })
+	h2 := e2.srv.AdminHandler()
+	post := func(h http.Handler, body string) int {
+		req := httptest.NewRequest("POST", "/v1/admin/import", strings.NewReader(body))
+		req.RemoteAddr = "127.0.0.1:2"
+		req.Header.Set("Authorization", "Bearer "+adminToken)
+		rr := httptest.NewRecorder()
+		h.ServeHTTP(rr, req)
+		return rr.Code
+	}
+	if c := post(h2, "not json"); c != 400 {
+		t.Fatalf("garbage: %d", c)
+	}
+	if c := post(h2, exp.Body.String()); c != 204 {
+		t.Fatalf("import: %d", c)
+	}
+	if e2.st.UnusedInvites() != 1 {
+		t.Fatal("invite hash not restored")
+	}
+	if c := post(h2, exp.Body.String()); c != 409 {
+		t.Fatalf("second import must be refused: %d", c)
+	}
+}

@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"time"
@@ -16,6 +17,9 @@ func main() {
 	ttlHours := flag.Int("ttl-hours", 24*7, "how long undelivered ciphertext is kept")
 	ipRate := flag.Float64("ip-rate", 0.5, "sustained requests/second allowed per client address on unauthenticated and auth endpoints")
 	ipBurst := flag.Float64("ip-burst", 30, "burst allowance per client address")
+	adminAddr := flag.String("admin-addr", "", "serve the admin endpoints ONLY on this loopback address (e.g. 127.0.0.1:8444) and remove them from the public listener")
+	recordIP := flag.Bool("record-ip", false, "remember each account's last client address in memory for the admin user list (never written to disk or logs)")
+	trustCF := flag.Bool("trust-cf-header", false, "trust Cf-Connecting-Ip when the request arrives from loopback (cloudflared on this machine)")
 	insecureDev := flag.Bool("insecure-dev", false, "serve plain HTTP on a loopback address (development only)")
 	flag.Parse()
 
@@ -31,7 +35,20 @@ func main() {
 	}
 	cfg := DefaultConfig(token)
 	cfg.IPRate, cfg.IPBurst = *ipRate, *ipBurst
+	cfg.RecordIP, cfg.TrustProxyHeader = *recordIP, *trustCF
+	if *adminAddr != "" {
+		host, _, err := net.SplitHostPort(*adminAddr)
+		if ip := net.ParseIP(host); err != nil || ip == nil || !ip.IsLoopback() {
+			log.Fatal("-admin-addr must be a loopback IP address such as 127.0.0.1:8444")
+		}
+		cfg.PublicAdmin = false
+	}
 	srv := NewServer(st, cfg)
+	if *adminAddr != "" {
+		as := &http.Server{Addr: *adminAddr, Handler: srv.AdminHandler(), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10}
+		go func() { log.Fatal(as.ListenAndServe()) }()
+		log.Printf("admin endpoints on %s (loopback only; not served on the public listener)", *adminAddr)
+	}
 
 	go func() {
 		for range time.Tick(time.Minute) {

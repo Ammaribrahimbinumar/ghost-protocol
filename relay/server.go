@@ -17,7 +17,9 @@ import (
 	"net"
 	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -42,10 +44,20 @@ type Config struct {
 	IPBurst      float64
 	MailboxRate  float64 // tokens/sec per authenticated mailbox
 	MailboxBurst float64
+
+	// PublicAdmin keeps /v1/admin/* on the public handler (the original behaviour). Turn it off and serve
+	// AdminHandler on a separate loopback-only listener so the admin endpoints cannot be reached through a tunnel.
+	PublicAdmin bool
+	// RecordIP remembers each account's last client address IN MEMORY ONLY (never written to the snapshot,
+	// never logged) so the admin can see it. Off by default.
+	RecordIP bool
+	// TrustProxyHeader makes the relay believe Cf-Connecting-Ip, but ONLY when the TCP peer is loopback
+	// (i.e. the request came through cloudflared running on this same machine).
+	TrustProxyHeader bool
 }
 
 func DefaultConfig(adminToken string) Config {
-	return Config{AdminToken: adminToken, MaxEnvelope: 64 << 10, IPRate: 0.5, IPBurst: 30, MailboxRate: 2, MailboxBurst: 60}
+	return Config{AdminToken: adminToken, MaxEnvelope: 64 << 10, IPRate: 0.5, IPBurst: 30, MailboxRate: 2, MailboxBurst: 60, PublicAdmin: true}
 }
 
 // ---- rate limiting ---------------------------------------------------------
@@ -114,6 +126,14 @@ type Server struct {
 	saltMu   sync.Mutex
 	salt     []byte
 	saltTime time.Time
+
+	seenMu sync.Mutex
+	seen   map[string]seenInfo // mailbox -> last address; memory only
+}
+
+type seenInfo struct {
+	addr string
+	at   time.Time
 }
 
 func NewServer(st *Store, cfg Config) *Server {
@@ -124,6 +144,7 @@ func NewServer(st *Store, cfg Config) *Server {
 		mbRL:      newLimiter(cfg.MailboxRate, cfg.MailboxBurst, st.now),
 		adminHash: sha256.Sum256([]byte(cfg.AdminToken)),
 		nonces:    map[string]time.Time{},
+		seen:      map[string]seenInfo{},
 	}
 	s.rotateSalt()
 	return s
@@ -139,13 +160,36 @@ func (s *Server) rotateSalt() {
 	s.saltTime = s.st.now()
 }
 
-// ipKey derives an ephemeral rate-limit key. The IP is never stored or logged;
-// only an HMAC under a salt that is rotated and kept in memory.
-func (s *Server) ipKey(r *http.Request) string {
+// clientHost is the peer address, or (only when configured, and only if the peer is loopback, i.e. our own
+// cloudflared) the address Cloudflare reports in Cf-Connecting-Ip.
+func (s *Server) clientHost(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		host = r.RemoteAddr
 	}
+	if s.cfg.TrustProxyHeader {
+		if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+			if fwd := net.ParseIP(strings.TrimSpace(r.Header.Get("Cf-Connecting-Ip"))); fwd != nil {
+				return fwd.String()
+			}
+		}
+	}
+	return host
+}
+
+func (s *Server) noteSeen(mailbox string, r *http.Request) {
+	if !s.cfg.RecordIP {
+		return
+	}
+	s.seenMu.Lock()
+	s.seen[mailbox] = seenInfo{addr: s.clientHost(r), at: s.st.now()}
+	s.seenMu.Unlock()
+}
+
+// ipKey derives an ephemeral rate-limit key. The IP is never stored or logged;
+// only an HMAC under a salt that is rotated and kept in memory.
+func (s *Server) ipKey(r *http.Request) string {
+	host := s.clientHost(r)
 	s.saltMu.Lock()
 	defer s.saltMu.Unlock()
 	m := hmac.New(sha256.New, s.salt)
@@ -178,7 +222,9 @@ func (s *Server) Maintain() int {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) })
-	mux.HandleFunc("POST /v1/admin/invites", s.adminInvite)
+	if s.cfg.PublicAdmin {
+		mux.HandleFunc("POST /v1/admin/invites", s.adminInvite)
+	}
 	mux.HandleFunc("POST /v1/register", s.register)
 	mux.HandleFunc("GET /v1/bundle/{username}", s.getBundle)
 	mux.HandleFunc("PUT /v1/prekeys", s.auth(s.putPrekeys))
@@ -187,6 +233,89 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/ack", s.auth(s.ack))
 	mux.HandleFunc("DELETE /v1/account", s.auth(s.deleteAccount))
 	return noStore(mux)
+}
+
+// AdminHandler serves only the admin endpoints. Bind it to a loopback address that is NOT forwarded by any tunnel.
+func (s *Server) AdminHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /v1/admin/invites", s.adminInvite)
+	mux.HandleFunc("GET /v1/admin/users", s.adminUsers)
+	mux.HandleFunc("GET /v1/admin/export", s.adminExport)
+	mux.HandleFunc("POST /v1/admin/import", s.adminImport)
+	return noStore(mux)
+}
+
+func (s *Server) adminOK(w http.ResponseWriter, r *http.Request) bool {
+	if !s.ipRL.allow(s.ipKey(r)) {
+		fail(w, http.StatusTooManyRequests, "rate limited")
+		return false
+	}
+	got := sha256.Sum256([]byte(bearer(r)))
+	if s.cfg.AdminToken == "" || !constEq(got[:], s.adminHash[:]) {
+		fail(w, http.StatusUnauthorized, "unauthorized")
+		return false
+	}
+	return true
+}
+
+func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
+	if !s.adminOK(w, r) {
+		return
+	}
+	type row struct {
+		Username string `json:"username"`
+		Created  int64  `json:"created,omitempty"`
+		LastSeen int64  `json:"last_seen,omitempty"`
+		IP       string `json:"ip,omitempty"`
+		Queued   int    `json:"queued"`
+	}
+	users := s.st.Users()
+	rows := make([]row, 0, len(users))
+	s.seenMu.Lock()
+	for _, u := range users {
+		x := row{Username: u.Username, Created: u.Created, Queued: u.Queued}
+		if s.cfg.RecordIP {
+			if si, ok := s.seen[u.MailboxID]; ok {
+				x.IP, x.LastSeen = si.addr, si.at.Unix()
+			}
+		}
+		rows = append(rows, x)
+	}
+	s.seenMu.Unlock()
+	sort.Slice(rows, func(i, j int) bool { return rows[i].Username < rows[j].Username })
+	writeJSON(w, http.StatusOK, map[string]any{"users": rows, "record_ip": s.cfg.RecordIP, "unused_invites": s.st.UnusedInvites()})
+}
+
+func (s *Server) adminExport(w http.ResponseWriter, r *http.Request) {
+	if !s.adminOK(w, r) {
+		return
+	}
+	data, err := s.st.Export()
+	if err != nil {
+		fail(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(data)
+}
+
+func (s *Server) adminImport(w http.ResponseWriter, r *http.Request) {
+	if !s.adminOK(w, r) {
+		return
+	}
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 8<<20))
+	if err != nil {
+		fail(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	switch err := s.st.Import(body); {
+	case errors.Is(err, ErrNotEmpty):
+		fail(w, http.StatusConflict, "not empty")
+	case err != nil:
+		fail(w, http.StatusBadRequest, "bad snapshot")
+	default:
+		w.WriteHeader(http.StatusNoContent)
+	}
 }
 
 func noStore(h http.Handler) http.Handler {
@@ -210,13 +339,7 @@ func fail(w http.ResponseWriter, code int, msg string) {
 // ---- unauthenticated endpoints --------------------------------------------
 
 func (s *Server) adminInvite(w http.ResponseWriter, r *http.Request) {
-	if !s.ipRL.allow(s.ipKey(r)) {
-		fail(w, http.StatusTooManyRequests, "rate limited")
-		return
-	}
-	got := sha256.Sum256([]byte(bearer(r)))
-	if s.cfg.AdminToken == "" || !constEq(got[:], s.adminHash[:]) {
-		fail(w, http.StatusUnauthorized, "unauthorized")
+	if !s.adminOK(w, r) {
 		return
 	}
 	code, err := s.st.CreateInvite()
@@ -303,6 +426,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		fail(w, http.StatusInternalServerError, "internal error")
 	default:
+		s.noteSeen(mailbox, r)
 		writeJSON(w, http.StatusCreated, map[string]string{"mailbox_id": mailbox})
 	}
 }
@@ -400,6 +524,7 @@ func (s *Server) auth(h authedHandler) http.HandlerFunc {
 			fail(w, http.StatusTooManyRequests, "rate limited")
 			return
 		}
+		s.noteSeen(mailbox, r)
 		h(w, r, mailbox, body)
 	}
 }

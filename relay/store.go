@@ -31,6 +31,7 @@ type Account struct {
 	AuthPub        []byte   `json:"auth_pub"` // ECDSA P-256 (X.509 SPKI DER), relay authentication only
 	Bundle         []byte   `json:"bundle"`
 	OneTimePrekeys [][]byte `json:"one_time_prekeys"`
+	Created        int64    `json:"created,omitempty"` // unix seconds, for the admin user list
 }
 
 type envelope struct {
@@ -108,11 +109,37 @@ func (s *Store) Register(invite, username string, authPub, bundle []byte, prekey
 		return "", ErrUsernameTaken
 	}
 	mailbox := randomID(16)
-	acct := &Account{Username: username, MailboxID: mailbox, AuthPub: authPub, Bundle: bundle, OneTimePrekeys: prekeys}
+	acct := &Account{Username: username, MailboxID: mailbox, AuthPub: authPub, Bundle: bundle, OneTimePrekeys: prekeys, Created: s.now().Unix()}
 	s.byMailbox[mailbox] = acct
 	s.byUsername[username] = mailbox
 	delete(s.invites, h)
 	return mailbox, s.persistLocked()
+}
+
+// UserInfo is the non-secret summary the admin sees.
+type UserInfo struct {
+	Username  string
+	MailboxID string
+	Created   int64
+	Queued    int
+}
+
+// Users lists registered accounts (never keys or ciphertext).
+func (s *Store) Users() []UserInfo {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]UserInfo, 0, len(s.byMailbox))
+	for mb, a := range s.byMailbox {
+		out = append(out, UserInfo{Username: a.Username, MailboxID: mb, Created: a.Created, Queued: len(s.queues[mb])})
+	}
+	return out
+}
+
+// UnusedInvites is how many issued invitation codes have not been used yet.
+func (s *Store) UnusedInvites() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.invites)
 }
 
 // AuthKey returns the ECDSA P-256 public key (DER) for a mailbox.
@@ -273,6 +300,51 @@ func (s *Store) persistLocked() error {
 		return err
 	}
 	return os.Rename(tmp, s.persistPath)
+}
+
+// Export returns the same snapshot persistLocked would write (accounts: public keys and usernames; invite
+// hashes). It contains no ciphertext, no private keys and no network addresses.
+func (s *Store) Export() ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	snap := snapshot{Accounts: []*Account{}, Invites: []string{}}
+	for _, a := range s.byMailbox {
+		snap.Accounts = append(snap.Accounts, a)
+	}
+	for h := range s.invites {
+		snap.Invites = append(snap.Invites, h)
+	}
+	return json.Marshal(snap)
+}
+
+// ErrNotEmpty is returned when an import is attempted on a store that already has accounts or invites.
+var ErrNotEmpty = errors.New("store not empty")
+
+// Import restores a snapshot produced by Export into an EMPTY store (used by the admin app, which keeps the
+// snapshot encrypted on disk itself, so the relay never has to write it in plaintext).
+func (s *Store) Import(data []byte) error {
+	var snap snapshot
+	if err := json.Unmarshal(data, &snap); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.byMailbox) != 0 || len(s.invites) != 0 {
+		return ErrNotEmpty
+	}
+	for _, a := range snap.Accounts {
+		if a == nil || a.MailboxID == "" || a.Username == "" {
+			return errors.New("bad snapshot")
+		}
+	}
+	for _, a := range snap.Accounts {
+		s.byMailbox[a.MailboxID] = a
+		s.byUsername[a.Username] = a.MailboxID
+	}
+	for _, h := range snap.Invites {
+		s.invites[h] = struct{}{}
+	}
+	return s.persistLocked()
 }
 
 // Load restores accounts and invite hashes from the snapshot, if present.
