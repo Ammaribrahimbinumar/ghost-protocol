@@ -22,6 +22,7 @@ import com.ghostprotocol.app.ui.StoreCorruptedScreen
 import com.ghostprotocol.app.ui.MessagingApp
 import com.ghostprotocol.app.messaging.AppController
 import java.io.File
+import kotlinx.coroutines.flow.first
 
 /**
  * Phase 1 entry point: calculator -> (secret) -> unlocked placeholder.
@@ -46,7 +47,7 @@ class MainActivity : ComponentActivity() {
         val store = KeystoreSecretStore(File(filesDir, "unlock.rec"), alias = "ghost_unlock_v1")
         val verifier = UnlockVerifier(store)
         controller = CalculatorController(verifier)
-        app = AppController(applicationContext).also { it.start() }
+        app = (application as GhostApplication).controller
 
         var corrupted = false
         var configured = false
@@ -57,6 +58,18 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
+            // Once the identity exists: start the periodic check and (Android 13+) ask once to allow the generic notification.
+            androidx.compose.runtime.LaunchedEffect(Unit) {
+                app.phase.first { it == com.ghostprotocol.app.messaging.Phase.Ready }
+                if (com.ghostprotocol.app.background.BackgroundCheck.isEnabled(this@MainActivity)) {
+                    com.ghostprotocol.app.background.BackgroundCheck.schedule(this@MainActivity)
+                    if (android.os.Build.VERSION.SDK_INT >= 33 && !com.ghostprotocol.app.background.BackgroundCheck.wasAsked(this@MainActivity) &&
+                        checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                        com.ghostprotocol.app.background.BackgroundCheck.markAsked(this@MainActivity)
+                        askNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                }
+            }
             GhostTheme {
                 var isConfigured by remember { mutableStateOf(configured) }
                 when {
@@ -86,10 +99,15 @@ class MainActivity : ComponentActivity() {
     }
 
     /** Leaving the app always returns to the calculator and wipes input. */
+    override fun onStart() { super.onStart(); (application as GhostApplication).inForeground = true }
+
     override fun onStop() {
         super.onStop()
+        (application as GhostApplication).inForeground = false
         lockNow()
     }
+
+    private val askNotifications = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { }
 
     private fun lockNow() {
         unlocked = false

@@ -168,4 +168,57 @@ class AppFlowTest {
         // and a fresh identity can be created afterwards
         app.register(url, invite(), nm("again")); app.phase.await { it == Phase.Ready }
     }
+
+    private fun notifications(): List<android.service.notification.StatusBarNotification> {
+        val n = ctx.getSystemService(android.app.NotificationManager::class.java)
+        repeat(25) { if (n.activeNotifications.isNotEmpty()) return n.activeNotifications.toList(); Thread.sleep(200) }
+        return n.activeNotifications.toList()
+    }
+
+    @Test fun backgroundCheckPostsOnlyAGenericNotificationAndOnlyWhenOffScreen() {
+        InstrumentationRegistry.getInstrumentation().uiAutomation.grantRuntimePermission(ctx.packageName, "android.permission.POST_NOTIFICATIONS")
+        val nmgr = ctx.getSystemService(android.app.NotificationManager::class.java)
+        nmgr.cancelAll()
+        val app = controller().also { it.start() }; val me = nm("me"); register(app, me)
+        val p = peer(); p.addContact(me)
+        val secret = "topsecretpayload" + nm("x")
+        try {
+            // 1. app on screen: message arrives, no notification
+            p.send(me, secret)
+            assertEquals(1, runBlocking { com.ghostprotocol.app.background.BackgroundCheck.run(ctx, app, foreground = true) })
+            Thread.sleep(1500); assertTrue("no notification while the app is on screen", nmgr.activeNotifications.isEmpty())
+            // 2. app off screen: generic notification
+            p.send(me, secret + "2")
+            assertEquals(1, runBlocking { com.ghostprotocol.app.background.BackgroundCheck.run(ctx, app, foreground = false) })
+            val n = notifications().single()
+            assertEquals(com.ghostprotocol.app.background.Notifier.ID, n.id)
+            val ex = n.notification.extras
+            assertEquals("Calculator", ex.getCharSequence(android.app.Notification.EXTRA_TITLE).toString())
+            assertEquals("Calculator got an update", ex.getCharSequence(android.app.Notification.EXTRA_TEXT).toString())
+            assertNull("no action buttons", n.notification.actions)
+            for (k in ex.keySet()) { val v = ex.get(k)?.toString() ?: continue
+                assertFalse("$k leaks the sender", v.contains(p.username)); assertFalse("$k leaks the text", v.contains("topsecretpayload")) }
+            // 3. nothing new: no change, count 0
+            nmgr.cancelAll()
+            assertEquals(0, runBlocking { com.ghostprotocol.app.background.BackgroundCheck.run(ctx, app, foreground = false) })
+            Thread.sleep(1500); assertTrue(nmgr.activeNotifications.isEmpty())
+            // 4. switched off: message still stored, no notification
+            com.ghostprotocol.app.background.BackgroundCheck.setEnabled(ctx, false)
+            p.send(me, secret + "3")
+            assertEquals(1, runBlocking { com.ghostprotocol.app.background.BackgroundCheck.run(ctx, app, foreground = false) })
+            Thread.sleep(1500); assertTrue("no notification when switched off", nmgr.activeNotifications.isEmpty())
+        } finally {
+            com.ghostprotocol.app.background.BackgroundCheck.setEnabled(ctx, true); com.ghostprotocol.app.background.BackgroundCheck.cancel(ctx); nmgr.cancelAll()
+        }
+    }
+
+    @Test fun scheduledCheckExistsAndEraseEverythingCancelsIt() {
+        val app = controller().also { it.start() }; register(app, nm("me"))
+        val js = ctx.getSystemService(android.app.job.JobScheduler::class.java)
+        com.ghostprotocol.app.background.BackgroundCheck.schedule(ctx)
+        val job = js.getPendingJob(com.ghostprotocol.app.background.BackgroundCheck.JOB_ID)
+        assertNotNull("periodic job scheduled", job); assertTrue(job!!.isPeriodic)
+        app.wipeAll()
+        assertNull("erase everything must stop the background check", js.getPendingJob(com.ghostprotocol.app.background.BackgroundCheck.JOB_ID))
+    }
 }

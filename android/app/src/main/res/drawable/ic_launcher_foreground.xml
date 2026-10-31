@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generic calculator drawing (original artwork). Kept inside the adaptive-icon safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- body -->
+    <path android:fillColor="#ECEFF1" android:pathData="M40,30 h28 a4,4 0 0 1 4,4 v40 a4,4 0 0 1 -4,4 h-28 a4,4 0 0 1 -4,-4 v-40 a4,4 0 0 1 4,-4 z" />
+    <!-- display -->
+    <path android:fillColor="#37474F" android:pathData="M40,34 h28 v10 h-28 z" />
+    <!-- number buttons (3 columns x 3 rows) -->
+    <path android:fillColor="#78909C" android:pathData="M40,48 h5 v6 h-5 z M47.7,48 h5 v6 h-5 z M55.3,48 h5 v6 h-5 z M40,58 h5 v6 h-5 z M47.7,58 h5 v6 h-5 z M55.3,58 h5 v6 h-5 z M40,68 h5 v6 h-5 z M47.7,68 h5 v6 h-5 z M55.3,68 h5 v6 h-5 z" />
+    <!-- operator column -->
+    <path android:fillColor="#FF9800" android:pathData="M63,48 h5 v6 h-5 z M63,58 h5 v6 h-5 z M63,68 h5 v6 h-5 z" />
+</vector>

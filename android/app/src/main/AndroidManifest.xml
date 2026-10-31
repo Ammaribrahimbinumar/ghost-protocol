@@ -5,11 +5,17 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Lets the app ask Android to hide other apps' overlay windows over its own window (API 31+). -->
     <uses-permission android:name="android.permission.HIDE_OVERLAY_WINDOWS" />
+    <!-- Generic "Calculator got an update" notification (Android 13+ asks the user at runtime). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Lets the periodic background check survive a reboot. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Deliberately NOT requested: contacts, phone state, location, storage, camera,
-         microphone, accessibility, device admin, VPN, notifications (added only when a
-         feature that needs them exists). See docs/PERMISSIONS.md. -->
+         microphone, accessibility, device admin, VPN, foreground services. See docs/PERMISSIONS.md. -->
 
     <application
+        android:name=".GhostApplication"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:allowBackup="false"
         android:fullBackupContent="@xml/backup_rules"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -29,5 +35,10 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".background.CheckJobService"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
     </application>
 </manifest>

@@ -22,6 +22,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
@@ -38,7 +40,7 @@ sealed interface Phase {
  * message content, key material or server detail can end up on screen or in logs.
  *
  * Messages are fetched only while the app is open and unlocked (no push service, so no third party sees
- * delivery timing). There are no notifications yet.
+ * delivery timing) except for the periodic background check in `background/`, which only posts a generic notification.
  */
 class AppController(
     context: Context,
@@ -121,16 +123,21 @@ class AppController(
         }
     }
 
-    suspend fun pollOnce() = withContext(Dispatchers.IO) {
-        val c = client ?: return@withContext
+    private val pollMutex = Mutex()
+
+    /** Fetch and decrypt waiting messages. Returns how many arrived (0 on any error). Polls never overlap. */
+    suspend fun pollOnce(): Int = pollMutex.withLock { withContext(Dispatchers.IO) {
+        val c = client ?: return@withContext 0
+        var got = 0
         try {
-            val r = c.poll(); c.purgeExpired(); _online.value = true
+            val r = c.poll(); c.purgeExpired(); _online.value = true; got = r.received
             if (r.keyChanges.isNotEmpty()) _notice.value = "Security warning: ${r.keyChanges.joinToString()} presented a different key. Open the chat to review."
         } catch (e: IOException) { _online.value = false
         } catch (e: RelayException) { _online.value = e.status !in 500..599 && e.status != 0
         } catch (e: Exception) { _notice.value = describe(e) }
         refresh()
-    }
+        got
+    } }
 
     fun addContact(name: String) = act { addContact(name.trim().lowercase()) }
     fun send(name: String, text: String) = act { send(name, text) }
@@ -149,6 +156,7 @@ class AppController(
      */
     fun wipeAll() {
         generation++
+        com.ghostprotocol.app.background.BackgroundCheck.cancel(ctx)
         scope.coroutineContext[kotlinx.coroutines.Job]?.children?.forEach { it.cancel() }
         client = null; openChat = null; openGroup = null
         runCatching {

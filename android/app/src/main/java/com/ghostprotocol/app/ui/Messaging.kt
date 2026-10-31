@@ -394,6 +394,13 @@ private fun SettingsScreen(v: UnlockVerifier, onBack: () -> Unit, onSetCode: (Bo
             KeyCap(if (duress) "Change" else "Set", Modifier.weight(1f), fontSize = 15.sp) { onSetCode(true) }
             if (duress) KeyCap("Remove", Modifier.weight(1f), fontSize = 15.sp) { v.clearDuress(); duress = false }
         }
+        val ctx = androidx.compose.ui.platform.LocalContext.current
+        var bg by remember { mutableStateOf(com.ghostprotocol.app.background.BackgroundCheck.isEnabled(ctx)) }
+        Text("Background check", color = Fg, fontSize = 17.sp)
+        Text("While the app is closed, Android checks the relay about every 15 minutes or later (not instant) and shows only \"Calculator got an update\" with no names or text. Status: " + if (bg) "on" else "off", color = Muted, fontSize = 14.sp)
+        KeyCap(if (bg) "Turn off" else "Turn on", Modifier.fillMaxWidth(), fontSize = 15.sp) {
+            bg = !bg; com.ghostprotocol.app.background.BackgroundCheck.setEnabled(ctx, bg)
+        }
         Text("Erase everything now", color = Fg, fontSize = 17.sp)
         Text("Deletes your identity, keys, chats and files from this phone. Cannot be undone.", color = Muted, fontSize = 14.sp)
         KeyCap(if (confirm) "Tap again to erase" else "Erase", Modifier.fillMaxWidth(), container = if (confirm) Color(0xFF6B2323) else Color(0xFF1C1C1F), fontSize = 15.sp) {

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Status-bar icon: single colour, calculator outline with a display and keys. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="1.6" android:fillColor="#00000000" android:pathData="M6,2.8 h12 a1.2,1.2 0 0 1 1.2,1.2 v16 a1.2,1.2 0 0 1 -1.2,1.2 h-12 a1.2,1.2 0 0 1 -1.2,-1.2 v-16 a1.2,1.2 0 0 1 1.2,-1.2 z" />
+    <path android:fillColor="#FFFFFF" android:pathData="M7.5,5.5 h9 v3 h-9 z M7.5,10.5 h2.4 v2.4 h-2.4 z M10.8,10.5 h2.4 v2.4 h-2.4 z M14.1,10.5 h2.4 v2.4 h-2.4 z M7.5,14.3 h2.4 v2.4 h-2.4 z M10.8,14.3 h2.4 v2.4 h-2.4 z M14.1,14.3 h2.4 v2.4 h-2.4 z M7.5,18 h2.4 v1 h-2.4 z M10.8,18 h2.4 v1 h-2.4 z M14.1,18 h2.4 v1 h-2.4 z" />
+</vector>
