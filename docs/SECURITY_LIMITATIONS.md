@@ -39,3 +39,5 @@ Read together with `THREAT_MODEL.md` and `FEATURE_REPORT.md`.
 - Debug builds permit cleartext to 127.0.0.1 only (for emulator tests); release config does not.
 - No notifications and no background fetching: messages arrive only while the app is open and unlocked.
 - Chat state snapshot is a single file rewritten on every change; a crash mid-write is handled by Android AtomicFile, but large histories will be slow.
+
+- **Notifications and background check:** the app now wakes about every 15 minutes (or later) to fetch and decrypt messages while closed, so messages are decrypted on the phone even when the calculator is locked, and the relay sees a connection from your IP on that schedule. The notification text is generic, but its existence and timing show that the app received something, and the icon and package name remain visible to Android and anyone holding the phone. Switch it off in Settings to stop background activity. No push service is used.

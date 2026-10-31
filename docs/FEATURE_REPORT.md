@@ -40,7 +40,9 @@ No security audit and no penetration test has been performed by anyone. Nothing 
 | Release hardening (R8, libsignal keep rules, log stripping) | PASS (release crypto pass on emulator) | Found and fixed a real JNI crash |
 | Signed release APK | BLOCKED here | Signing key must exist only on your machine; see BUILD_AND_SIGNING.md |
 | Linked devices / revocation | NOT IMPLEMENTED | |
-| Notifications | NOT IMPLEMENTED | No notification code exists |
+| Launcher icon (generic calculator, adaptive + themed) | BUILT; resources compile and the build passes; rendered preview checked by me | Not yet seen on a real phone launcher |
+| Generic notification "Calculator got an update" | PASS (emulator: only on arrival while off-screen; title/text fixed; no sender, text, count or buttons; none while app is on screen; none when switched off) | Real-phone behaviour NOT RUN |
+| Background check (JobScheduler, ~15 min or later) | PASS (emulator: job scheduled; erase-everything cancels it) | Not instant. Doze/battery saver can delay it a lot; OEM battery managers may kill it. Real timing NOT RUN |
 | Tor / I2P routing | NOT IMPLEMENTED | |
 | Sealed sender | NOT IMPLEMENTED | |
 | Group attachments, Sender Keys, SQLCipher | NOT IMPLEMENTED | |

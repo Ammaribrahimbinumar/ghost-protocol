@@ -47,7 +47,7 @@ Copy `app-debug.apk` to the phone, open it, and allow "install unknown apps" for
 1. Open the app: it is a calculator. First run asks you to set your **secret unlock** (digits, you choose; no default exists). If you forget it, the only way back in is clearing the app's data, which erases everything. This is by design.
 2. Type your secret then press `=` to open the real app.
 3. **Join a relay:** relay address, invitation code, username. Everything is typed on the in-app keyboard.
-4. **Add contact:** the other person's exact username. Send a message. They see it within about 5 seconds, **only while their app is open and unlocked** (there are no notifications and no background fetching yet).
+4. **Add contact:** the other person's exact username. Send a message. They see it within about 5 seconds, while their app is open and unlocked, or after a delay of about 15 minutes or more via the background check (which shows only a generic notification).
 5. Open **Safety #** in the chat. Both phones must show identical numbers. Compare them out loud or in person, then tap **Mark as verified**.
 
 ## What to report back (PASS / FAIL / not tried)
@@ -60,4 +60,4 @@ Android version + phone model, and:
 - Anything crashing, freezing, or confusing.
 
 ## Known limits of this build (so you are not surprised)
-No notifications, no groups/broadcast/attachments, disappearing timer is local to each phone, no linked devices, no decoy/duress mode, no Tor/I2P, relay can see which usernames talk to each other and when (sender names are not hidden), keys stay in memory while the app process lives (locking hides the screen but does not erase memory), debug build only (allows plain HTTP to 127.0.0.1 for tests; the release build will not).
+Notifications are generic ("Calculator got an update") and delayed (about 15 minutes or later, not instant). Groups, broadcast, attachments, decoy/duress codes and disappearing messages exist but have not been tried on a real phone. No linked devices, no Tor/I2P, relay can see which usernames talk to each other and when (sender names are not hidden), keys stay in memory while the app process lives (locking hides the screen but does not erase memory), debug build only (allows plain HTTP to 127.0.0.1 for tests; the release build will not).
