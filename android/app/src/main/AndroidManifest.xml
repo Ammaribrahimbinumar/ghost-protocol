@@ -5,6 +5,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Lets the app ask Android to hide other apps' overlay windows over its own window (API 31+). -->
     <uses-permission android:name="android.permission.HIDE_OVERLAY_WINDOWS" />
+    <!-- Required by Android for the background check to wait until a network is available. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!-- Generic "Calculator got an update" notification (Android 13+ asks the user at runtime). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Lets the periodic background check survive a reboot. -->

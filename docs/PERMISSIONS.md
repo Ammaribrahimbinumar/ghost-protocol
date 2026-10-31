@@ -3,6 +3,7 @@
 | Permission | Why | Notes |
 |---|---|---|
 | `INTERNET` | Reach the relay over TLS 1.3 | Normal permission, no runtime prompt |
+| `ACCESS_NETWORK_STATE` | Android requires it so the background check only runs when a network is available | Normal permission, no prompt |
 | `POST_NOTIFICATIONS` | Show only a generic "Calculator got an update" notification (Android 13+ runtime prompt, asked once after you join a relay) | No sender, text, count or buttons; you can switch the background check off in Settings |
 | `RECEIVE_BOOT_COMPLETED` | Lets the periodic background check keep its schedule after a reboot | Normal permission, no prompt |
 | `HIDE_OVERLAY_WINDOWS` | Ask Android to hide other apps' overlay windows over Ghost_Protocol (tapjacking protection, API 31+) | Normal permission, no runtime prompt; visible in the package's permission list |
